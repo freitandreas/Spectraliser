@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000" width="100%" height="100%">
+  <!-- Hintergrund -->
+  <rect width="1000" height="1000" fill="#0B1033"/>
+
+  <!-- 7 gleich breite Regenbogen-Strahlen (Fächer vom Scheitelpunkt 500,190) -->
+  <!-- 1. Rot -->
+  <polygon points="500,190 195.0,665.0 282.1,674.3" fill="#E52421"/>
+  <!-- 2. Orange -->
+  <polygon points="500,190 282.1,674.3 369.3,680.5" fill="#FF7B00"/>
+  <!-- 3. Gelb -->
+  <polygon points="500,190 369.3,680.5 456.4,683.6" fill="#FBCB03"/>
+  <!-- 4. Grün (Zentraler Strahl) -->
+  <polygon points="500,190 456.4,683.6 543.6,683.6" fill="#3DB54A"/>
+  <!-- 5. Cyan -->
+  <polygon points="500,190 543.6,683.6 630.7,680.5" fill="#00ADEF"/>
+  <!-- 6. Blau -->
+  <polygon points="500,190 630.7,680.5 717.9,674.3" fill="#2B52BE"/>
+  <!-- 7. Lila -->
+  <polygon points="500,190 717.9,674.3 805.0,665.0" fill="#9B27B0"/>
+
+  <!-- Dunkle Außenkonturen & Verbindungen aller Atome (verdecken die Strahlenden sauber) -->
+  <!-- Bindungs-Konturen -->
+  <line x1="250" y1="760" x2="500" y2="650" stroke="#0B1033" stroke-width="80" stroke-linecap="round"/>
+  <line x1="500" y1="650" x2="750" y2="760" stroke="#0B1033" stroke-width="80" stroke-linecap="round"/>
+  
+  <!-- Atom-Konturen -->
+  <circle cx="250" cy="760" r="112" fill="#0B1033"/>
+  <circle cx="750" cy="760" r="112" fill="#0B1033"/>
+  <circle cx="500" cy="650" r="112" fill="#0B1033"/>
+
+  <!-- Farbige Bindungsbrücken -->
+  <line x1="250" y1="760" x2="500" y2="650" stroke="#E52421" stroke-width="48" stroke-linecap="round"/>
+  <line x1="500" y1="650" x2="750" y2="760" stroke="#9B27B0" stroke-width="48" stroke-linecap="round"/>
+
+  <!-- Atom-Kugeln & Glanzlichter -->
+  <!-- Linkes Atom (Rot) -->
+  <g>
+    <circle cx="250" cy="760" r="96" fill="#E52421"/>
+    <circle cx="212" cy="722" r="26" fill="#FF7875"/>
+  </g>
+
+  <!-- Rechtes Atom (Lila) -->
+  <g>
+    <circle cx="750" cy="760" r="96" fill="#9B27B0"/>
+    <circle cx="712" cy="722" r="26" fill="#D77BFA"/>
+  </g>
+
+  <!-- Mittleres Atom (Grün) -->
+  <g>
+    <circle cx="500" cy="650" r="96" fill="#3DB54A"/>
+    <circle cx="462" cy="612" r="26" fill="#8FE388"/>
+  </g>
+</svg>
