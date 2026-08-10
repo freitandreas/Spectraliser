@@ -1,47 +1,109 @@
-# Svelte + TS + Vite
+# Spectra Visualiser
 
-This template should help get you started developing with Svelte and TypeScript in Vite.
+A browser-based spectroscopy data visualisation and processing tool. Load CSV/XLSX spectral data files, apply a non-destructive processing pipeline, inspect results interactively, and export a report together with a reproducible Python script.
 
-## Recommended IDE Setup
+## Features
 
-[VS Code](https://code.visualstudio.com/) + [Svelte](https://marketplace.visualstudio.com/items?itemName=svelte.svelte-vscode).
+- **Import wizard** — load CSV/TSV/XLSX files with configurable delimiter, decimal separator, header row, and column mapping. Supports multi-file batch import with a live table/plot preview.
+- **Interactive plot** — renders all loaded spectra with Plotly. Highlights the selected spectrum, supports hover-point picking, and responds to window resizes automatically.
+- **Non-destructive processing pipeline** — each spectrum carries an ordered pipeline of transform steps. Steps are applied in a fixed order (crop → baseline → smoothing → inversion → normalization → derivative). The original data is never modified.
+  - **Crop** — restrict the x-axis range.
+  - **Baseline correction** — polynomial fit subtraction (configurable degree).
+  - **Smoothing** — Savitzky–Golay filter (configurable window length and polynomial order).
+  - **Inversion** — negate the y-axis.
+  - **Normalization** — min-max, vector (L2), area, or peak normalization.
+  - **Derivative** — first or second derivative via Savitzky–Golay.
+- **Python script generation** — a Python script (NumPy / pandas / SciPy) is auto-generated from the current pipeline and kept in sync with the GUI state. The script can be copied or exported to run the exact same processing outside the browser.
+- **Report export** — produces a fully self-contained single-file HTML or pdf report. 
+- **Autosave** — the project state is automatically persisted to IndexedDB (`spectralab` database) and restored on next visit.
+- **Pyodide worker** — heavy pipeline computation runs in a Web Worker via Pyodide (Python in WebAssembly), keeping the UI responsive.
 
-## Need an official Svelte framework?
+## Getting Started
 
-Check out [SvelteKit](https://github.com/sveltejs/kit#readme), which is also powered by Vite. Deploy anywhere with its serverless-first approach and adapt to various platforms, with out of the box support for TypeScript, SCSS, and Less, and easily-added support for mdsvex, GraphQL, PostCSS, Tailwind CSS, and more.
+### Prerequisites
 
-## Technical considerations
+- Node.js ≥ 18
 
-**Why use this over SvelteKit?**
+### Install
 
-- It brings its own routing solution which might not be preferable for some users.
-- It is first and foremost a framework that just happens to use Vite under the hood, not a Vite app.
-
-This template contains as little as possible to get started with Vite + TypeScript + Svelte, while taking into account the developer experience with regards to HMR and intellisense. It demonstrates capabilities on par with the other `create-vite` templates and is a good starting point for beginners dipping their toes into a Vite + Svelte project.
-
-Should you later need the extended capabilities and extensibility provided by SvelteKit, the template has been structured similarly to SvelteKit so that it is easy to migrate.
-
-**Why `global.d.ts` instead of `compilerOptions.types` inside `jsconfig.json` or `tsconfig.json`?**
-
-Setting `compilerOptions.types` shuts out all other types not explicitly listed in the configuration. Using triple-slash references keeps the default TypeScript setting of accepting type information from the entire workspace, while also adding `svelte` and `vite/client` type information.
-
-**Why include `.vscode/extensions.json`?**
-
-Other templates indirectly recommend extensions via the README, but this file allows VS Code to prompt the user to install the recommended extension upon opening the project.
-
-**Why enable `allowJs` in the TS template?**
-
-While `allowJs: false` would indeed prevent the use of `.js` files in the project, it does not prevent the use of JavaScript syntax in `.svelte` files. In addition, it would force `checkJs: false`, bringing the worst of both worlds: not being able to guarantee the entire codebase is TypeScript, and also having worse typechecking for the existing JavaScript. In addition, there are valid use cases in which a mixed codebase may be relevant.
-
-**Why is HMR not preserving my local component state?**
-
-HMR state preservation comes with a number of gotchas! It has been disabled by default in both `svelte-hmr` and `@sveltejs/vite-plugin-svelte` due to its often surprising behavior. You can read the details [here](https://github.com/rixo/svelte-hmr#svelte-hmr).
-
-If you have state that's important to retain within a component, consider creating an external store which would not be replaced by HMR.
-
-```ts
-// store.ts
-// An extremely simple external store
-import { writable } from 'svelte/store'
-export default writable(0)
+```bash
+npm install
 ```
+
+### Development server
+
+```bash
+npm run dev
+```
+
+### Production build
+
+```bash
+npm run build
+```
+
+### Preview production build
+
+```bash
+npm run preview
+```
+
+## Testing
+
+```bash
+npm test            # run tests once
+npm run test:watch  # watch mode
+npm run coverage    # coverage report
+```
+
+Tests live in the `tests/` directory and use Vitest with jsdom.
+
+## Type checking
+
+```bash
+npm run check
+```
+
+## Project Structure
+
+```
+src/
+  main.ts                        # App entry point
+  App.svelte                     # Root component
+  app.css                        # Global styles
+  types/
+    project.ts                   # Core type definitions (AppState, SpectrumDataset, …)
+  lib/
+    ImportWizard.svelte          # File import dialog
+    PlotPanel.svelte             # Plotly chart wrapper
+  services/
+    import/
+      importWizard.ts            # Import option defaults & validation
+      parsers.ts                 # CSV/TSV/XLSX parsing
+    script/
+      scriptGenerator.ts         # Python script AST builder
+      syncStateMachine.ts        # GUI ↔ script sync state machine
+    export/
+      htmlReport.ts              # Self-contained HTML report generator
+    persistence/
+      autosave.ts                # IndexedDB autosave helpers
+    worker/
+      workerClient.ts            # Web Worker RPC client
+tests/                           # Vitest unit tests
+```
+
+## Tech Stack
+
+| Layer | Library |
+|---|---|
+| UI framework | [Svelte 5](https://svelte.dev) |
+| Build tool | [Vite 8](https://vitejs.dev) |
+| Language | TypeScript 6 |
+| Charting | [Plotly.js](https://plotly.com/javascript/) |
+| Code editor | [CodeMirror 6](https://codemirror.net) |
+| Python runtime | [Pyodide](https://pyodide.org) (WebAssembly) |
+| Spreadsheet parsing | [SheetJS (xlsx)](https://sheetjs.com) |
+| Compression | [pako](https://github.com/nodeca/pako) (gzip) |
+| Persistence | [idb](https://github.com/jakearchibald/idb) (IndexedDB) |
+| Schema validation | [Zod](https://zod.dev) |
+| Testing | [Vitest](https://vitest.dev) |
