@@ -1,8 +1,12 @@
 import { defineConfig } from 'vitest/config'
 import { svelte } from '@sveltejs/vite-plugin-svelte'
 
+// GitHub project pages serve from /<repo>/, so built asset URLs need that prefix.
+const repositoryBase = '/Spectra_Visualiser/'
+
 // https://vite.dev/config/
-export default defineConfig({
+export default defineConfig(({ command }) => ({
+  base: command === 'build' ? (process.env.BASE_PATH ?? repositoryBase) : '/',
   plugins: [svelte()],
   optimizeDeps: {
     exclude: ['pyodide'],
@@ -16,4 +20,4 @@ export default defineConfig({
       include: ['src/**/*.ts'],
     },
   },
-})
+}))

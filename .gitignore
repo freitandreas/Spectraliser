@@ -26,5 +26,4 @@ dist-ssr
 *.pyc
 __pycache__/
 
-.github/
 .vscode/
