@@ -22,41 +22,46 @@ function createFakeEndpoint() {
   }
 }
 
-describe('WorkerClient queue cancellation', () => {
-  it('sends cancel for previous execution', async () => {
+describe('WorkerClient execution queue', () => {
+  const scriptInput = {
+    spectrumId: 's1',
+    abscissa: [1],
+    ordinate: [1],
+    metadata: {
+      name: 'sample',
+      sourcePath: 'sample.csv',
+      spectrumType: 'uv-vis',
+      units: { x: 'nm', y: '' },
+      style: { label: 'Sample', lineColor: '#4fc1ff', lineWidth: 2, scatterSymbol: 'circle' },
+    },
+    scriptCode: "df['ordinate_modified']=df['ordinate_original']",
+    preferFloat32: true,
+  }
+
+  it('serializes follow-up executions without canceling the in-flight request', async () => {
     const fake = createFakeEndpoint()
     const client = new WorkerClient(fake.endpoint)
 
-    const first = client.executePipeline({
-      spectrumId: 's1',
-      abscissa: [1],
-      ordinate: [1],
-      pipelineCode: "df['ordinate_modified']=df['ordinate_original']",
-      preferFloat32: true,
-    })
+    const first = client.executeScript(scriptInput)
 
-    const second = client.executePipeline({
-      spectrumId: 's1',
-      abscissa: [1],
-      ordinate: [1],
-      pipelineCode: "df['ordinate_modified']=df['ordinate_original']",
-      preferFloat32: true,
-    })
+    const second = client.executeScript(scriptInput)
 
-    const executeMessages = fake.posted.filter((msg) => msg.type === 'execute_pipeline')
+    const initRequest = fake.posted.find(msg => msg.type === 'init')
+    if (!initRequest) throw new Error('Initialization request missing')
+    fake.emit({ type: 'ready', requestId: initRequest.requestId, pyodideVersion: 'test' })
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    const executeMessages = fake.posted.filter((msg) => msg.type === 'execute_script')
     const cancelMessage = fake.posted.find((msg) => msg.type === 'cancel')
 
-    expect(executeMessages).toHaveLength(2)
-    expect(cancelMessage).toBeDefined()
+    expect(executeMessages).toHaveLength(1)
+    expect(cancelMessage).toBeUndefined()
 
     const firstExec = executeMessages[0]
-    const secondExec = executeMessages[1]
-
-    if (!firstExec || !secondExec || !cancelMessage || cancelMessage.type !== 'cancel') {
-      throw new Error('Messages missing')
+    if (!firstExec) {
+      throw new Error('First execution message missing')
     }
 
-    fake.emit({ type: 'cancelled', requestId: cancelMessage.requestId })
     fake.emit({
       type: 'result',
       requestId: firstExec.requestId,
@@ -64,6 +69,18 @@ describe('WorkerClient queue cancellation', () => {
       ordinateModified: [1],
       precision: 'float32',
     })
+
+    await expect(first).resolves.toMatchObject({ type: 'result' })
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    const queuedMessages = fake.posted.filter((msg) => msg.type === 'execute_script')
+    expect(queuedMessages).toHaveLength(2)
+
+    const secondExec = queuedMessages[1]
+    if (!secondExec) {
+      throw new Error('Queued execution message missing')
+    }
+
     fake.emit({
       type: 'result',
       requestId: secondExec.requestId,
@@ -72,7 +89,6 @@ describe('WorkerClient queue cancellation', () => {
       precision: 'float32',
     })
 
-    await expect(first).resolves.toMatchObject({ type: 'result' })
     await expect(second).resolves.toMatchObject({ type: 'result' })
   })
 })

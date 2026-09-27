@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { generatePythonScript } from '../src/services/script/scriptGenerator'
+import { generatePythonScript, generatePythonFiles, PYTHON_FILE_NAMES } from '../src/services/script/scriptGenerator'
 import type { SpectrumDataset } from '../src/types/project'
 
 function buildDataset(): SpectrumDataset {
@@ -30,6 +30,7 @@ function buildDataset(): SpectrumDataset {
       scatterSymbol: 'circle',
       label: 'Sample 01 (Processed)',
     },
+    peaks: [],
   }
 }
 
@@ -42,7 +43,11 @@ describe('generatePythonScript', () => {
 
   it('includes style values in output', () => {
     const script = generatePythonScript([buildDataset()])
-    expect(script).toContain("line=dict(color='#ffffff', width=2)")
-    expect(script).toContain("name='Sample 01 (Processed)'")
+    expect(script).toContain('\\"lineColor\\":\\"#ffffff\\"')
+    expect(script).toContain('\\"label\\":\\"Sample 01 (Processed)\\"')
+    const files = generatePythonFiles([buildDataset()])
+    expect(Object.keys(files)).toEqual(PYTHON_FILE_NAMES)
+    expect(files['ir_assignments.py']).toContain('def assign_ir_peaks(')
+    expect(files['processing.py']).toContain('def process_spectrum(')
   })
 })

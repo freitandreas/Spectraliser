@@ -1,47 +1,53 @@
-# Svelte + TS + Vite
+# Spectraliser
 
-This template should help get you started developing with Svelte and TypeScript in Vite.
+An in-browser spectrum workbench with editable Python processing powered by Pyodide.
 
-## Recommended IDE Setup
+## Start
 
-[VS Code](https://code.visualstudio.com/) + [Svelte](https://marketplace.visualstudio.com/items?itemName=svelte.svelte-vscode).
-
-## Need an official Svelte framework?
-
-Check out [SvelteKit](https://github.com/sveltejs/kit#readme), which is also powered by Vite. Deploy anywhere with its serverless-first approach and adapt to various platforms, with out of the box support for TypeScript, SCSS, and Less, and easily-added support for mdsvex, GraphQL, PostCSS, Tailwind CSS, and more.
-
-## Technical considerations
-
-**Why use this over SvelteKit?**
-
-- It brings its own routing solution which might not be preferable for some users.
-- It is first and foremost a framework that just happens to use Vite under the hood, not a Vite app.
-
-This template contains as little as possible to get started with Vite + TypeScript + Svelte, while taking into account the developer experience with regards to HMR and intellisense. It demonstrates capabilities on par with the other `create-vite` templates and is a good starting point for beginners dipping their toes into a Vite + Svelte project.
-
-Should you later need the extended capabilities and extensibility provided by SvelteKit, the template has been structured similarly to SvelteKit so that it is easy to migrate.
-
-**Why `global.d.ts` instead of `compilerOptions.types` inside `jsconfig.json` or `tsconfig.json`?**
-
-Setting `compilerOptions.types` shuts out all other types not explicitly listed in the configuration. Using triple-slash references keeps the default TypeScript setting of accepting type information from the entire workspace, while also adding `svelte` and `vite/client` type information.
-
-**Why include `.vscode/extensions.json`?**
-
-Other templates indirectly recommend extensions via the README, but this file allows VS Code to prompt the user to install the recommended extension upon opening the project.
-
-**Why enable `allowJs` in the TS template?**
-
-While `allowJs: false` would indeed prevent the use of `.js` files in the project, it does not prevent the use of JavaScript syntax in `.svelte` files. In addition, it would force `checkJs: false`, bringing the worst of both worlds: not being able to guarantee the entire codebase is TypeScript, and also having worse typechecking for the existing JavaScript. In addition, there are valid use cases in which a mixed codebase may be relevant.
-
-**Why is HMR not preserving my local component state?**
-
-HMR state preservation comes with a number of gotchas! It has been disabled by default in both `svelte-hmr` and `@sveltejs/vite-plugin-svelte` due to its often surprising behavior. You can read the details [here](https://github.com/rixo/svelte-hmr#svelte-hmr).
-
-If you have state that's important to retain within a component, consider creating an external store which would not be replaced by HMR.
-
-```ts
-// store.ts
-// An extremely simple external store
-import { writable } from 'svelte/store'
-export default writable(0)
+```sh
+npm ci
+npm run dev
 ```
+
+Use **Check**, **Test** and **Build** with `npm run check`, `npm test` and `npm run build`.
+Run the scientific rule tests with:
+
+```sh
+PYTHONPATH=src/python python3 -m unittest discover -s tests -p 'test_*.py'
+```
+
+## Editable Python files
+
+The Script tab has a scrollable file list on the left and one editor on the right.
+`main.py` embeds the sample metadata, `processing.py` applies the ordered
+transforms, `sample_io.py` loads CSVs for standalone Python, `ir_assignments.py`
+detects and assigns IR peaks, and `ir_reference.py` holds the band catalog.
+Changes to each file are saved with the project. **Execute** loads all current
+files into the worker, reloads edited modules and processes the selected samples.
+**Revert To GUI State** clears edits to all Python files and rebuilds `main.py`
+from the current sample metadata. The other modules return to their defaults.
+
+In standalone Python, put the modules in the same directory and run `main.py`.
+The `sourcePath` values in its sample metadata must point to readable CSV files.
+
+## IR peak assignments
+
+Set the spectrum type to **IR** and the X unit to wavenumbers (`cm-1`,
+`cm^-1`, `cm⁻¹`, `1/cm` or `wavenumber`). The Y unit should say **Absorbance**
+or **Transmittance**; `%T` is also accepted. With an empty X unit, a plausible
+350–5000 cm⁻¹ axis is assumed. Execute the script to populate the peak table.
+The algorithm detects maxima in absorbance or minima in transmittance, computes
+relative prominence and width, and scores functional-group candidates using
+their expected ranges, intensity and nearby companion bands. For instance,
+a primary amine needs two distinct narrow N–H stretches; an ester needs its
+carbonyl and two C–O bands. The table shows intensity and confidence, while
+hovering the label shows alternatives. Manually edited labels are kept on rerun.
+
+The reference covers common organic, organosulfur, organophosphorus and
+organosilicon groups, plus halides. No finite frequency table can identify
+every possible group or prove a molecular structure from IR alone. Overlapping
+bands, mixtures, weak absorptions and truncated spectra remain ambiguous. A
+generic region label and low confidence are used when the data are insufficient.
+The band windows are based on the [NIST correlation charts](https://www.nist.gov/publications/middle-range-infrared-absorption-correlation-charts)
+and are intended as screening suggestions; compare against measured standards
+such as the [NIST Chemistry WebBook](https://webbook.nist.gov/chemistry/).

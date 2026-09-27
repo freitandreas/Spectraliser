@@ -1,143 +1,93 @@
 <script lang="ts">
-  import { onMount, tick } from 'svelte'
-  import { EditorState, Transaction } from '@codemirror/state'
-  import { EditorView, keymap, lineNumbers, highlightActiveLine } from '@codemirror/view'
-  import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
-  import { python } from '@codemirror/lang-python'
-  import { oneDark } from '@codemirror/theme-one-dark'
+  import { tick } from 'svelte'
   import ImportWizard from './lib/ImportWizard.svelte'
-  import PlotPanel from './lib/PlotPanel.svelte'
-  import { validateImportOptions } from './services/import/importWizard'
-  import { generateSelfContainedHtmlReport } from './services/export/htmlReport'
+  import WorkbenchHeader from './lib/workbench/WorkbenchHeader.svelte'
+  import SampleExplorer from './lib/workbench/SampleExplorer.svelte'
+  import WorkspaceMain from './lib/workbench/WorkspaceMain.svelte'
+  import SettingsSidebar from './lib/workbench/SettingsSidebar.svelte'
+  import ConfirmDialogs from './lib/workbench/ConfirmDialogs.svelte'
+  import { importFileWithOptions } from './services/import/appImport'
+  import { downloadReport } from './services/export/downloadReport'
+  import type { ImportOptions } from './services/import/parsers'
+  import { projectStore } from './state/projectStore'
+  import { type NormalizationMode } from './types/project'
   import {
-    parseDelimitedCollection,
-    parseXlsxCollection,
-    type ImportOptions,
-  } from './services/import/parsers'
-  import { activeDataset, projectStore } from './state/projectStore'
+    applyGlobalAxisMetadata,
+    applyGlobalLineWidth,
+    applyGlobalNormalization,
+    applyGlobalPalette,
+    applyGlobalSmoothing,
+    removeAllDatasets,
+    setAllDatasetsVisible,
+    setTransformEnabled,
+    setTransformParams,
+    type GlobalApplyContext,
+  } from './state/workbenchActions'
+  import {
+    beginResize,
+    resolveResize,
+    type ActiveResize,
+    type PanelSizes,
+  } from './lib/workbench/panelResize'
+  import {
+    makeSampleTabId,
+    parseSampleTabId,
+    type ResizeKind,
+    type SampleSubView,
+  } from './lib/workbench/workbenchUtils'
 
   let importOpen = false
   let importError = ''
   let wizardFiles: File[] = []
-  let explorerFileInputEl: HTMLInputElement | null = null
+  let exportOpen = false
+  let exportFormat: 'html' | 'csv' | 'json' = 'html'
 
   let overwriteModalOpen = false
   let pendingGuiAction: (() => void) | null = null
   let globalScopeModalOpen = false
   let pendingGlobalAction: (() => void) | null = null
 
-  let editingTitle = false
-  let titleDraft = ''
-  let titleInputEl: HTMLInputElement | null = null
   let layoutEl: HTMLDivElement | null = null
-  let mainEl: HTMLElement | null = null
-  let tableScrollEl: HTMLDivElement | null = null
-  let scriptEditorHostEl: HTMLDivElement | null = null
+  let workspaceMain: any = null
   let openSampleTabIds: string[] = []
   let expandedSampleId: string | null = null
   let explorerFocusDatasetId: string | null = null
   let activeWorkspaceTab: 'script_view' | string = 'script_view'
-  let hoverSelection: { datasetId: string; pointIndex: number } | null = null
-  let rightPanelSection: 'general' | 'style' | 'pipeline' | null = 'general'
   let leftPanelWidth = 260
-  let rightPanelWidth = 230
+  let rightPanelWidth = 320
   let bottomPanelHeight = 360
-  let codeMirrorView: EditorView | null = null
-  let scriptAutoExecute = false
-  let scriptExecuting = false
-  let suppressEditorSync = false
-  let autoExecuteTimer: number | null = null
-  let lastScriptDebugSignature = ''
 
-  type SampleSubView = 'data' | 'peaks'
+  let leftPanelOpen = true
+  let rightPanelOpen = true
+  let bottomPanelOpen = true
+  let rightPanelDatasetId: string | null = null
+  let explorerHoverDatasetId: string | null = null
 
-  type ResizeKind = 'left' | 'right' | 'bottom'
+  let activeResize: ActiveResize | null = null
 
-  let activeResize: {
-    kind: ResizeKind
-    startX: number
-    startY: number
-    startLeft: number
-    startRight: number
-    startBottom: number
-  } | null = null
+  $: panelSizes = { left: leftPanelWidth, right: rightPanelWidth, bottom: bottomPanelHeight } as PanelSizes
 
-  $: currentScript = $projectStore.userScriptOverride ?? $projectStore.generatedScript
-  $: {
-    const signature = [
-      $projectStore.syncMode,
-      $projectStore.scriptSyncEnabled ? 'sync-on' : 'sync-off',
-      $projectStore.userScriptOverride === null ? 'generated' : 'override',
-      String($projectStore.generatedScript.length),
-      String($projectStore.userScriptOverride?.length ?? 0),
-    ].join('|')
-
-    if (signature !== lastScriptDebugSignature) {
-      lastScriptDebugSignature = signature
-      console.debug('[script-debug] editor_script_source', {
-        syncMode: $projectStore.syncMode,
-        scriptSyncEnabled: $projectStore.scriptSyncEnabled,
-        source: $projectStore.userScriptOverride === null ? 'generatedScript' : 'userScriptOverride',
-        generatedLength: $projectStore.generatedScript.length,
-        overrideLength: $projectStore.userScriptOverride?.length ?? 0,
-      })
-    }
-  }
   $: plotSelectedSpectrumId = explorerFocusDatasetId
     ?? (activeWorkspaceTab === 'script_view' ? null : $projectStore.viewState.selectedSpectrumId)
+
   $: openedSampleTabs = openSampleTabIds
     .map((tabId) => {
       const parsed = parseSampleTabId(tabId)
-      if (!parsed) {
-        return null
-      }
-      const dataset = $projectStore.datasets.find((item) => item.id === parsed.datasetId)
-      if (!dataset) {
-        return null
-      }
+      if (!parsed) return null
 
-      return {
-        tabId,
-        dataset,
-        subView: parsed.subView,
-      }
+      const dataset = $projectStore.datasets.find((item) => item.id === parsed.datasetId)
+      if (!dataset) return null
+
+      return { tabId, dataset, subView: parsed.subView }
     })
     .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
-  $: visibleDatasets = $projectStore.datasets
-    .filter((dataset) => dataset.style.visible !== false)
-  $: activeSampleTabMeta = activeWorkspaceTab === 'script_view'
-    ? null
-    : parseSampleTabId(activeWorkspaceTab)
+
+  $: visibleDatasets = $projectStore.datasets.filter((dataset) => dataset.style.visible !== false)
+  $: activeSampleTabMeta = activeWorkspaceTab === 'script_view' ? null : parseSampleTabId(activeWorkspaceTab)
   $: activeSampleTabDataset = activeSampleTabMeta
     ? ($projectStore.datasets.find((dataset) => dataset.id === activeSampleTabMeta.datasetId) ?? null)
     : null
   $: activeSampleSubView = activeSampleTabMeta?.subView ?? 'data'
-
-  $: if (activeWorkspaceTab === 'script_view' || !activeSampleTabDataset) {
-    hoverSelection = null
-  }
-
-  $: if (hoverSelection && activeSampleTabDataset && hoverSelection.datasetId === activeSampleTabDataset.id) {
-    void tick().then(() => {
-      const row = tableScrollEl?.querySelector<HTMLTableRowElement>(
-        `[data-row-index='${hoverSelection?.pointIndex}']`,
-      )
-      if (!row || !tableScrollEl) {
-        return
-      }
-
-      const rowTop = row.offsetTop
-      const rowBottom = rowTop + row.offsetHeight
-      const visibleTop = tableScrollEl.scrollTop
-      const visibleBottom = visibleTop + tableScrollEl.clientHeight
-
-      if (rowTop < visibleTop) {
-        tableScrollEl.scrollTop = rowTop - 8
-      } else if (rowBottom > visibleBottom) {
-        tableScrollEl.scrollTop = rowBottom - tableScrollEl.clientHeight + 8
-      }
-    })
-  }
 
   $: {
     const available = new Set($projectStore.datasets.map((dataset) => dataset.id))
@@ -145,9 +95,9 @@
       const parsed = parseSampleTabId(id)
       return parsed ? available.has(parsed.datasetId) : false
     })
-    if (filtered.length !== openSampleTabIds.length) {
-      openSampleTabIds = filtered
-    }
+
+    if (filtered.length !== openSampleTabIds.length) openSampleTabIds = filtered
+
     if (activeWorkspaceTab !== 'script_view') {
       const activeParsed = parseSampleTabId(activeWorkspaceTab)
       if (!activeParsed || !available.has(activeParsed.datasetId)) {
@@ -155,184 +105,30 @@
       }
     }
 
-    if (expandedSampleId && !available.has(expandedSampleId)) {
-      expandedSampleId = null
-    }
-
-    if (explorerFocusDatasetId && !available.has(explorerFocusDatasetId)) {
-      explorerFocusDatasetId = null
-    }
+    if (expandedSampleId && !available.has(expandedSampleId)) expandedSampleId = null
+    if (explorerFocusDatasetId && !available.has(explorerFocusDatasetId)) explorerFocusDatasetId = null
+    if (explorerHoverDatasetId && !available.has(explorerHoverDatasetId)) explorerHoverDatasetId = null
+    if (rightPanelDatasetId && !available.has(rightPanelDatasetId)) rightPanelDatasetId = null
   }
 
-  $: if ($activeDataset && !editingTitle) {
-    titleDraft = $activeDataset.style.label
-  }
-
-  function ensureCodeMirror(): void {
-    if (!scriptEditorHostEl || codeMirrorView) {
-      return
-    }
-
-    codeMirrorView = new EditorView({
-      state: EditorState.create({
-        doc: currentScript,
-        extensions: [
-          lineNumbers(),
-          highlightActiveLine(),
-          history(),
-          keymap.of([...defaultKeymap, ...historyKeymap]),
-          python(),
-          oneDark,
-          EditorView.theme({
-            '&': { height: '100%' },
-            '.cm-scroller': { overflow: 'auto' },
-          }),
-          EditorView.updateListener.of((update) => {
-            if (!update.docChanged) {
-              return
-            }
-            if (suppressEditorSync) {
-              return
-            }
-            projectStore.setScriptOverride(update.state.doc.toString())
-
-            const userEdited = update.transactions.some((tx) => {
-              const event = tx.annotation(Transaction.userEvent)
-              return Boolean(event && (event.startsWith('input') || event.startsWith('delete') || event.startsWith('paste')))
-            })
-
-            if (scriptAutoExecute && userEdited) {
-              scheduleAutoExecute()
-            }
-          }),
-        ],
-      }),
-      parent: scriptEditorHostEl,
-    })
-  }
-
-  onMount(() => {
-    ensureCodeMirror()
-
-    return () => {
-      if (autoExecuteTimer !== null) {
-        window.clearTimeout(autoExecuteTimer)
-        autoExecuteTimer = null
-      }
-      codeMirrorView?.destroy()
-      codeMirrorView = null
-    }
-  })
-
-  $: if (scriptEditorHostEl && activeWorkspaceTab === 'script_view') {
-    ensureCodeMirror()
-  }
-
-  $: if (codeMirrorView && currentScript !== codeMirrorView.state.doc.toString()) {
-    suppressEditorSync = true
-    codeMirrorView.dispatch({
-      changes: {
-        from: 0,
-        to: codeMirrorView.state.doc.length,
-        insert: currentScript,
-      },
-    })
-    suppressEditorSync = false
-  }
-
-  function scheduleAutoExecute(): void {
-    if (!scriptAutoExecute) {
-      return
-    }
-
-    if (autoExecuteTimer !== null) {
-      window.clearTimeout(autoExecuteTimer)
-    }
-
-    autoExecuteTimer = window.setTimeout(() => {
-      void executeScriptAutoMode()
-    }, 420)
-  }
-
-  async function executeScript(): Promise<void> {
-    if (scriptExecuting || scriptAutoExecute || $projectStore.datasets.length === 0) {
-      return
-    }
-
-    scriptExecuting = true
-    try {
-      await projectStore.executeScriptForDatasets(currentScript)
-    } finally {
-      scriptExecuting = false
-    }
-  }
-
-  function handleAutoExecuteToggle(event: Event): void {
-    const target = event.target as HTMLInputElement
-    scriptAutoExecute = target.checked
-    if (scriptAutoExecute) {
-      void executeScriptAutoMode()
-    } else if (autoExecuteTimer !== null) {
-      window.clearTimeout(autoExecuteTimer)
-      autoExecuteTimer = null
-    }
-  }
-
-  async function executeScriptAutoMode(): Promise<void> {
-    if (scriptExecuting || $projectStore.datasets.length === 0) {
-      return
-    }
-
-    scriptExecuting = true
-    try {
-      await projectStore.executeScriptForDatasets(currentScript)
-    } finally {
-      scriptExecuting = false
-    }
-  }
-
-  async function importFileWithOptions(file: File, options: ImportOptions): Promise<void> {
-    const issues = validateImportOptions(options)
-    if (issues.length > 0) {
-      importError = issues.join(' ')
-      return
-    }
-
-    const lowerName = file.name.toLowerCase()
-    const collection = lowerName.endsWith('.xlsx')
-      ? parseXlsxCollection(await file.arrayBuffer(), options)
-      : parseDelimitedCollection(await file.text(), options)
-
-    if (collection.series.length === 0) {
-      importError = 'No numeric X/Y rows could be parsed with the current import settings.'
-      return
-    }
-
-    const sourcePath = file.webkitRelativePath?.trim().length ? file.webkitRelativePath : file.name
-    const baseLabel = file.name.replace(/\.[^.]+$/, '').replaceAll('_', ' ').trim() || file.name
-
-    projectStore.importDatasets(
-      collection.series.map((series, index) => ({
-        name: file.name,
-        sourcePath,
-        label: options.hasHeader
-          ? series.label
-          : (collection.series.length > 1 ? `${baseLabel} ${index + 1}` : baseLabel),
-        parsed: {
-          abscissa: series.abscissa,
-          ordinate: series.ordinate,
-        },
-      })),
-    )
-  }
+  $: rightPanelDataset = rightPanelDatasetId
+    ? ($projectStore.datasets.find((dataset) => dataset.id === rightPanelDatasetId) ?? null)
+    : null
 
   async function handleImport(event: CustomEvent<{ files: File[]; options: ImportOptions }>): Promise<void> {
     importError = ''
     const { files, options } = event.detail
 
     try {
-      for (const file of files) {
-        await importFileWithOptions(file, options)
+      for (const [index, file] of files.entries()) {
+        const error = await importFileWithOptions(file, {
+          ...options,
+          seriesLabelOverrides: options.seriesLabelOverridesByFile?.[index],
+        })
+        if (error) {
+          importError = error
+          return
+        }
       }
       importOpen = false
       wizardFiles = []
@@ -342,40 +138,9 @@
   }
 
   function openWizardWithFiles(files: File[]): void {
-    if (files.length === 0) {
-      return
-    }
+    if (files.length === 0) return
     wizardFiles = files
     importOpen = true
-  }
-
-  function openExplorerFilePicker(): void {
-    explorerFileInputEl?.click()
-  }
-
-  function handleExplorerFileInput(event: Event): void {
-    const target = event.target as HTMLInputElement
-    const files = target.files ? Array.from(target.files) : []
-    openWizardWithFiles(files)
-    target.value = ''
-  }
-
-  function handleDropImport(event: DragEvent): void {
-    event.preventDefault()
-    const files = event.dataTransfer?.files ? Array.from(event.dataTransfer.files) : []
-    openWizardWithFiles(files)
-  }
-
-  function downloadReport(): void {
-    const state = projectStore.snapshot()
-    const html = generateSelfContainedHtmlReport(state)
-    const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const anchor = document.createElement('a')
-    anchor.href = url
-    anchor.download = `${state.projectName.replace(/\s+/g, '_')}.html`
-    anchor.click()
-    URL.revokeObjectURL(url)
   }
 
   function queueGuiAction(action: () => void): void {
@@ -384,28 +149,23 @@
       overwriteModalOpen = true
       return
     }
-
     action()
   }
 
-  function updateColor(event: Event): void {
-    const dataset = $activeDataset
-    if (!dataset) {
-      return
-    }
-
-    const target = event.target as HTMLInputElement
-    queueGuiAction(() => projectStore.updateStyle(dataset.id, { lineColor: target.value }))
+  function renameDataset(datasetId: string, label: string): void {
+    queueGuiAction(() => projectStore.updateStyle(datasetId, { label }))
   }
 
-  function updateWidth(event: Event): void {
-    const dataset = $activeDataset
-    if (!dataset) {
-      return
-    }
+  function updateDatasetStyle(datasetId: string, patch: Record<string, unknown>): void {
+    queueGuiAction(() => projectStore.updateStyle(datasetId, patch as any))
+  }
 
-    const target = event.target as HTMLInputElement
-    queueGuiAction(() => projectStore.updateStyle(dataset.id, { lineWidth: Number(target.value) }))
+  function updateDatasetMetadata(datasetId: string, patch: Record<string, unknown>): void {
+    queueGuiAction(() => projectStore.updateDatasetMetadata(datasetId, patch as any))
+  }
+
+  function convertDatasetAbscissa(datasetId: string, targetUnit: string): void {
+    queueGuiAction(() => projectStore.convertDatasetAbscissa(datasetId, targetUnit))
   }
 
   function confirmOverwriteAndApply(): void {
@@ -425,20 +185,29 @@
     overwriteModalOpen = false
   }
 
-  function updateTransformEnabled(datasetId: string, transformId: string, enabled: boolean): void {
-    queueGuiAction(() => projectStore.updateTransform(datasetId, transformId, { enabled }))
+  function updateTransformEnabled(
+    datasetId: string,
+    transformId: string,
+    enabled: boolean,
+    scope: 'no' | 'individual' | 'global',
+  ): void {
+    setTransformEnabled(globalContext, datasetId, transformId, enabled, scope)
   }
 
   function updateTransformScope(
     datasetId: string,
     transformId: string,
     scope: 'no' | 'individual' | 'global',
+    snapshot: { enabled: boolean; params: Record<string, number | string | boolean> },
   ): void {
     if (scope === 'global') {
       pendingGlobalAction = () => {
-        queueGuiAction(() => {
-          projectStore.updateTransformGlobal(transformId, { scope: 'global' })
-        })
+        // Switching to global also pushes this step's current configuration to every sample.
+        queueGuiAction(() => projectStore.updateTransformGlobal(transformId, {
+          scope: 'global',
+          enabled: snapshot.enabled,
+          params: snapshot.params,
+        }))
       }
       globalScopeModalOpen = true
       return
@@ -453,15 +222,7 @@
     params: Record<string, number | string | boolean>,
     currentScope: 'no' | 'individual' | 'global',
   ): void {
-    const apply = () => {
-      if (currentScope === 'global') {
-        projectStore.updateTransformGlobal(transformId, { params })
-      } else {
-        projectStore.updateTransform(datasetId, transformId, { params })
-      }
-    }
-
-    queueGuiAction(apply)
+    setTransformParams(globalContext, datasetId, transformId, params, currentScope)
   }
 
   function confirmGlobalScopeApply(): void {
@@ -471,38 +232,37 @@
     action?.()
   }
 
+  function confirmExport(): void {
+    exportOpen = false
+    downloadReport(exportFormat)
+  }
+
   function cancelGlobalScopeApply(): void {
     pendingGlobalAction = null
     globalScopeModalOpen = false
   }
 
+  function requestGlobalApply(action: () => void): void {
+    pendingGlobalAction = () => queueGuiAction(action)
+    globalScopeModalOpen = true
+  }
+
+  const globalContext: GlobalApplyContext = { queueGuiAction, requestGlobalApply }
+
+  function removeAllSamples(): void {
+    if ($projectStore.datasets.length === 0) return
+    if (!confirm(`Remove all ${$projectStore.datasets.length} samples?`)) return
+    removeAllDatasets()
+  }
+
+  function clearFileSelection(): void {
+    explorerFocusDatasetId = null
+    rightPanelDatasetId = null
+  }
+
   function removeDatasetFromExplorer(datasetId: string): void {
     const dataset = $projectStore.datasets.find((item) => item.id === datasetId)
-    if (!dataset) {
-      return
-    }
-
-    if (confirm(`Remove ${dataset.style.label}?`)) {
-      projectStore.removeDataset(dataset.id)
-    }
-  }
-
-  function makeSampleTabId(datasetId: string, subView: SampleSubView): string {
-    return `${datasetId}::${subView}`
-  }
-
-  function parseSampleTabId(tabId: string): { datasetId: string; subView: SampleSubView } | null {
-    if (tabId === 'script_view') {
-      return null
-    }
-
-    const [datasetId, subViewRaw] = tabId.split('::')
-    if (!datasetId) {
-      return null
-    }
-
-    const subView: SampleSubView = subViewRaw === 'peaks' ? 'peaks' : 'data'
-    return { datasetId, subView }
+    if (dataset && confirm(`Remove ${dataset.style.label}?`)) projectStore.removeDataset(dataset.id)
   }
 
   function toggleSampleExpanded(datasetId: string): void {
@@ -512,131 +272,42 @@
   function focusSampleInExplorer(datasetId: string): void {
     toggleSampleExpanded(datasetId)
     explorerFocusDatasetId = datasetId
-    hoverSelection = null
-  }
-
-  function isExplorerRowSelected(datasetId: string): boolean {
-    if (explorerFocusDatasetId) {
-      return explorerFocusDatasetId === datasetId
-    }
-
-    return $projectStore.viewState.selectedSpectrumId === datasetId
+    rightPanelDatasetId = datasetId
+    rightPanelOpen = true
+    workspaceMain?.clearHoverSelection()
+    projectStore.selectDataset(datasetId)
   }
 
   function toggleSampleVisibility(datasetId: string): void {
     const dataset = $projectStore.datasets.find((item) => item.id === datasetId)
-    if (!dataset) {
-      return
-    }
+    if (!dataset) return
 
     const currentlyVisible = dataset.style.visible !== false
     queueGuiAction(() => projectStore.updateStyle(datasetId, { visible: !currentlyVisible }))
   }
 
-  function updateSpectrumType(event: Event): void {
-    if (!activeSampleTabDataset) {
-      return
-    }
-    const target = event.target as HTMLSelectElement
-    const nextType = target.value === 'ir' || target.value === 'raman' ? target.value : 'uv-vis'
-    queueGuiAction(() => projectStore.updateDatasetMetadata(activeSampleTabDataset.id, { spectrumType: nextType }))
-  }
-
-  function updateSourcePath(event: Event): void {
-    if (!activeSampleTabDataset) {
-      return
-    }
-    const target = event.target as HTMLInputElement
-    queueGuiAction(() => projectStore.updateDatasetMetadata(activeSampleTabDataset.id, { sourcePath: target.value }))
-  }
-
-  function updateUnitsX(event: Event): void {
-    if (!activeSampleTabDataset) {
-      return
-    }
-    const target = event.target as HTMLInputElement
-    queueGuiAction(() => projectStore.updateDatasetMetadata(activeSampleTabDataset.id, { units: { x: target.value } }))
-  }
-
-  function updateUnitsY(event: Event): void {
-    if (!activeSampleTabDataset) {
-      return
-    }
-    const target = event.target as HTMLInputElement
-    queueGuiAction(() => projectStore.updateDatasetMetadata(activeSampleTabDataset.id, { units: { y: target.value } }))
-  }
-
-  function handleSampleTabsWheel(event: WheelEvent): void {
-    const target = event.currentTarget as HTMLDivElement | null
-    if (!target) {
-      return
-    }
-
-    if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) {
-      return
-    }
-
-    target.scrollLeft += event.deltaY
-    event.preventDefault()
-  }
-
   function activateScriptTab(): void {
+    activeWorkspaceTab = 'script_view'
     explorerFocusDatasetId = null
     projectStore.setActiveTab('script_view')
   }
 
   function openSampleSubTab(datasetId: string, subView: SampleSubView): void {
     const tabId = makeSampleTabId(datasetId, subView)
-    if (!openSampleTabIds.includes(tabId)) {
-      openSampleTabIds = [...openSampleTabIds, tabId]
-    }
+    if (!openSampleTabIds.includes(tabId)) openSampleTabIds = [...openSampleTabIds, tabId]
+
     activeWorkspaceTab = tabId
     explorerFocusDatasetId = null
+    rightPanelDatasetId = datasetId
+    rightPanelOpen = true
+    bottomPanelOpen = true
     projectStore.selectDataset(datasetId)
     projectStore.setActiveTab(subView === 'peaks' ? 'peak_table' : 'sample_view')
   }
 
-  function setHoverSelection(datasetId: string, pointIndex: number | null): void {
-    if (pointIndex === null) {
-      if (hoverSelection === null) {
-        return
-      }
-      hoverSelection = null
-      return
-    }
-
-    if (
-      activeSampleTabDataset?.id === datasetId
-      && hoverSelection?.datasetId === datasetId
-      && hoverSelection.pointIndex === pointIndex
-    ) {
-      return
-    }
-
-    if (activeSampleTabDataset?.id === datasetId) {
-      hoverSelection = { datasetId, pointIndex }
-    }
-  }
-
-  function handlePlotHoverEvent(event: CustomEvent<{ datasetId: string; pointIndex: number } | null>): void {
-    if (!event.detail) {
-      setHoverSelection('', null)
-      return
-    }
-
-    setHoverSelection(event.detail.datasetId, event.detail.pointIndex)
-  }
-
   function startResize(kind: ResizeKind, event: MouseEvent): void {
     event.preventDefault()
-    activeResize = {
-      kind,
-      startX: event.clientX,
-      startY: event.clientY,
-      startLeft: leftPanelWidth,
-      startRight: rightPanelWidth,
-      startBottom: bottomPanelHeight,
-    }
+    activeResize = beginResize(kind, event, panelSizes)
 
     document.body.style.userSelect = 'none'
     document.body.style.cursor = kind === 'bottom' ? 'row-resize' : 'col-resize'
@@ -645,30 +316,17 @@
   }
 
   function handleResizeMove(event: MouseEvent): void {
-    if (!activeResize || !layoutEl || !mainEl) {
-      return
-    }
+    if (!activeResize || !layoutEl) return
 
-    if (activeResize.kind === 'left') {
-      const dx = event.clientX - activeResize.startX
-      const maxLeft = Math.max(220, layoutEl.clientWidth - rightPanelWidth - 460)
-      leftPanelWidth = Math.min(maxLeft, Math.max(180, activeResize.startLeft + dx))
-      codeMirrorView?.requestMeasure()
-      return
-    }
+    const next = resolveResize(activeResize, event, panelSizes, {
+      layoutWidth: layoutEl.clientWidth,
+      mainHeight: workspaceMain?.getMainHeight() ?? 0,
+    })
 
-    if (activeResize.kind === 'right') {
-      const dx = event.clientX - activeResize.startX
-      const maxRight = Math.max(180, layoutEl.clientWidth - leftPanelWidth - 500)
-      rightPanelWidth = Math.min(maxRight, Math.max(170, activeResize.startRight - dx))
-      codeMirrorView?.requestMeasure()
-      return
-    }
-
-    const dy = event.clientY - activeResize.startY
-    const maxBottom = Math.max(220, mainEl.clientHeight - 220)
-    bottomPanelHeight = Math.min(maxBottom, Math.max(180, activeResize.startBottom - dy))
-    codeMirrorView?.requestMeasure()
+    leftPanelWidth = next.left
+    rightPanelWidth = next.right
+    bottomPanelHeight = next.bottom
+    workspaceMain?.requestScriptMeasure()
   }
 
   function stopResize(): void {
@@ -683,15 +341,12 @@
     const nextTabs = openSampleTabIds.filter((id) => id !== tabId)
     const wasActive = activeWorkspaceTab === tabId
     openSampleTabIds = nextTabs
-
-    if (!wasActive) {
-      return
-    }
+    if (!wasActive) return
 
     const fallbackId = nextTabs[nextTabs.length - 1]
     if (!fallbackId) {
-      activeWorkspaceTab = 'script_view'
-      projectStore.setActiveTab('script_view')
+      activateScriptTab()
+      void tick().then(() => workspaceMain?.requestScriptMeasure())
       return
     }
 
@@ -702,588 +357,143 @@
       projectStore.setActiveTab(parsed.subView === 'peaks' ? 'peak_table' : 'sample_view')
     }
   }
-
-  async function startTitleEdit(): Promise<void> {
-    if (!$activeDataset) {
-      return
-    }
-
-    editingTitle = true
-    titleDraft = $activeDataset.style.label
-    await tick()
-    titleInputEl?.focus()
-    titleInputEl?.select()
-  }
-
-  function commitTitleEdit(): void {
-    const dataset = $activeDataset
-    if (!dataset) {
-      editingTitle = false
-      return
-    }
-
-    const trimmed = titleDraft.trim()
-    if (trimmed.length > 0 && trimmed !== dataset.style.label) {
-      queueGuiAction(() => projectStore.updateStyle(dataset.id, { label: trimmed }))
-    }
-    editingTitle = false
-  }
-
-  function cancelTitleEdit(): void {
-    editingTitle = false
-    if ($activeDataset) {
-      titleDraft = $activeDataset.style.label
-    }
-  }
-
-  function handleTitleKeydown(event: KeyboardEvent): void {
-    if (event.key === 'Enter') {
-      event.preventDefault()
-      commitTitleEdit()
-    }
-
-    if (event.key === 'Escape') {
-      event.preventDefault()
-      cancelTitleEdit()
-    }
-  }
 </script>
 
 <div class="workbench">
-  <header class="topbar">
-    <div class="brand">Spectraliser</div>
-    <nav class="menu toolbar-nav" aria-label="Main toolbar">
-      <button type="button" class="toolbar-button" on:click={openExplorerFilePicker}>Data</button>
-      <button
-        type="button"
-        class="toolbar-button"
-        on:click={() => {
-          activeWorkspaceTab = 'script_view'
-          activateScriptTab()
-          codeMirrorView?.requestMeasure()
-        }}
-      >
-        Script
-      </button>
-      <button
-        type="button"
-        class="toolbar-button"
-        on:click={() => {
-          const selectedId = $projectStore.viewState.selectedSpectrumId ?? $projectStore.datasets[0]?.id
-          if (selectedId) {
-            openSampleSubTab(selectedId, 'data')
-          }
-        }}
-      >
-        Analyse
-      </button>
-      <button
-        type="button"
-        class="toolbar-button"
-        on:click={() => {
-          rightPanelSection = 'general'
-        }}
-      >
-        Settings
-      </button>
-      <button type="button" class="toolbar-button" title="Use the Import Wizard, Script View, and Sample Settings to configure analysis.">
-        About/Help
-      </button>
-    </nav>
-    <div class="actions">
-      <button type="button" class="ghost" on:click={downloadReport}>Export</button>
-    </div>
-  </header>
+  <WorkbenchHeader
+    {leftPanelOpen}
+    {bottomPanelOpen}
+    {rightPanelOpen}
+    scriptProgress={$projectStore.scriptProgress}
+    onToggleData={() => { leftPanelOpen = !leftPanelOpen }}
+    onToggleScript={() => {
+      bottomPanelOpen = !bottomPanelOpen
+      if (bottomPanelOpen) {
+        activateScriptTab()
+        void tick().then(() => workspaceMain?.requestScriptMeasure())
+      }
+    }}
+    onAnalyse={() => {
+      const selectedId = $projectStore.viewState.selectedSpectrumId ?? $projectStore.datasets[0]?.id
+      if (selectedId) openSampleSubTab(selectedId, 'data')
+    }}
+    onToggleSettings={() => {
+      rightPanelOpen = !rightPanelOpen
+      if (rightPanelOpen) rightPanelDatasetId = null
+    }}
+    onExport={() => { exportOpen = true }}
+    datasetCount={$projectStore.datasets.length}
+    onRemoveAll={removeAllSamples}
+    onShowAll={() => setAllDatasetsVisible(globalContext, true)}
+    onHideAll={() => setAllDatasetsVisible(globalContext, false)}
+  />
 
   <div
     class="layout"
     bind:this={layoutEl}
-    style={`grid-template-columns:${leftPanelWidth}px 6px minmax(0, 1fr) 6px ${rightPanelWidth}px;`}
+    style={`grid-template-columns:${leftPanelOpen ? leftPanelWidth : 0}px ${leftPanelOpen ? 6 : 0}px minmax(0, 1fr) ${rightPanelOpen ? 6 : 0}px ${rightPanelOpen ? rightPanelWidth : 0}px;`}
   >
-    <aside class="sidebar">
-      <section>
-        <h2>Samples</h2>
-
-        <div
-          class="drop-field"
-          role="button"
-          tabindex="0"
-          aria-label="Import spectra files"
-          on:click={openExplorerFilePicker}
-          on:keydown={(event) => {
-            if (event.key === 'Enter' || event.key === ' ') {
-              event.preventDefault()
-              openExplorerFilePicker()
-            }
-          }}
-          on:dragover|preventDefault
-          on:drop={handleDropImport}
-        >
-          <div class="drop-title">Drop or Click To Import Files</div>
-          <div class="drop-subtitle">CSV, TSV, TXT, XLSX</div>
-        </div>
-
-        <input
-          bind:this={explorerFileInputEl}
-          class="hidden-file-input"
-          type="file"
-          accept=".csv,.tsv,.txt,.xlsx"
-          multiple
-          on:change={handleExplorerFileInput}
-        />
-
-        {#each $projectStore.datasets as dataset (dataset.id)}
-          <div class:selected={isExplorerRowSelected(dataset.id)} class="sample-row" class:expanded={expandedSampleId === dataset.id}>
-            <div class="sample-row-main">
-              <button type="button" class="file" on:click={() => focusSampleInExplorer(dataset.id)}>
-                <span class="sample-chevron" class:expanded={expandedSampleId === dataset.id} aria-hidden="true">▸</span>
-                <span class="sample-color-bar" style={`--sample-color:${dataset.style.lineColor};`}></span>
-                {dataset.style.label}
-              </button>
-              <button
-                type="button"
-                class="visibility-toggle"
-                class:hidden-state={dataset.style.visible === false}
-                aria-label={`${dataset.style.visible === false ? 'Show' : 'Hide'} ${dataset.style.label}`}
-                title={dataset.style.visible === false ? 'Show sample' : 'Hide sample'}
-                on:click={() => toggleSampleVisibility(dataset.id)}
-              >
-                <span class="eye-icon" aria-hidden="true">
-                  <span class="eye-pupil"></span>
-                </span>
-              </button>
-              <button
-                type="button"
-                class="remove-x"
-                aria-label={`Remove ${dataset.style.label}`}
-                on:click={() => removeDatasetFromExplorer(dataset.id)}
-              >
-                x
-              </button>
-            </div>
-
-            {#if expandedSampleId === dataset.id}
-              <div class="sample-subitems">
-                <button type="button" class="sample-subitem" on:click={() => openSampleSubTab(dataset.id, 'data')}>
-                  Data Table
-                </button>
-                <button type="button" class="sample-subitem" on:click={() => openSampleSubTab(dataset.id, 'peaks')}>
-                  Peak Assignments
-                </button>
-              </div>
-            {/if}
-          </div>
-        {/each}
-      </section>
-    </aside>
+    <SampleExplorer
+      open={leftPanelOpen}
+      datasets={$projectStore.datasets}
+      {expandedSampleId}
+      selectedDatasetId={explorerFocusDatasetId ?? $projectStore.viewState.selectedSpectrumId}
+      onClose={() => { leftPanelOpen = false }}
+      onFiles={openWizardWithFiles}
+      onFocus={focusSampleInExplorer}
+      onToggleVisibility={toggleSampleVisibility}
+      onRemove={removeDatasetFromExplorer}
+      onOpenSubTab={openSampleSubTab}
+      onHoverSample={(datasetId) => { explorerHoverDatasetId = datasetId }}
+    />
 
     <button
       type="button"
       class="resizer-col"
+      class:hidden={!leftPanelOpen}
       aria-label="Resize left panel"
       on:mousedown={(event) => startResize('left', event)}
     ></button>
 
-    <main class="main" bind:this={mainEl} style={`grid-template-rows:minmax(220px, 1fr) 8px ${bottomPanelHeight}px;`}>
-      <section class="plot-shell">
-        <PlotPanel
-          datasets={visibleDatasets}
-          selectedSpectrumId={plotSelectedSpectrumId}
-          {hoverSelection}
-          on:hoverpoint={handlePlotHoverEvent}
-        />
-      </section>
-
-      <button
-        type="button"
-        class="resizer-row"
-        aria-label="Resize bottom panel"
-        on:mousedown={(event) => startResize('bottom', event)}
-      ></button>
-
-      <section class="bottom-panel">
-        <div class="tabs">
-          <div class="sample-tabs-scroll" on:wheel={handleSampleTabsWheel}>
-            {#each openedSampleTabs as tabEntry (tabEntry.tabId)}
-              <div
-                class="sample-tab-shell"
-                class:active={activeWorkspaceTab === tabEntry.tabId}
-                style={`--tab-color:${tabEntry.dataset.style.lineColor};`}
-              >
-                <button
-                  type="button"
-                  class="tab tab-button sample-tab-button"
-                  on:click={() => openSampleSubTab(tabEntry.dataset.id, tabEntry.subView)}
-                >
-                  <span class="sample-color-bar tab-color-bar" style={`--sample-color:${tabEntry.dataset.style.lineColor};`}></span>
-                  {tabEntry.dataset.style.label} • {tabEntry.subView === 'data' ? 'Data' : 'Peaks'}
-                </button>
-                <button
-                  type="button"
-                  class="tab-close"
-                  aria-label={`Close ${tabEntry.dataset.style.label} ${tabEntry.subView === 'data' ? 'Data' : 'Peaks'} tab`}
-                  on:click={() => closeSampleTab(tabEntry.tabId)}
-                >
-                  x
-                </button>
-              </div>
-            {/each}
-          </div>
-          <div
-            class="sample-tab-shell script-tab-shell"
-            class:active={activeWorkspaceTab === 'script_view'}
-            style="--tab-color:#8ea0b4;"
-          >
-            <button
-              type="button"
-              class="tab tab-button sample-tab-button script-tab-button"
-              on:click={() => {
-                activeWorkspaceTab = 'script_view'
-                activateScriptTab()
-                codeMirrorView?.requestMeasure()
-              }}
-            >
-              <span class="sample-color-bar tab-color-bar" style="--sample-color:#8ea0b4;"></span>
-              Script
-            </button>
-          </div>
-        </div>
-
-        {#if activeWorkspaceTab !== 'script_view' && activeSampleTabDataset}
-          <div class="sample-shell">
-            {#if activeSampleSubView === 'data'}
-              <div class="sample-table-wrap">
-                <h3>Data Table</h3>
-                <div class="sample-table-scroll" bind:this={tableScrollEl}>
-                  <table class="sample-table" style={`--row-accent:${activeSampleTabDataset.style.lineColor};`}>
-                    <thead>
-                      <tr>
-                        <th>X</th>
-                        <th>Original</th>
-                        <th>Modified</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {#each activeSampleTabDataset.data.abscissa as point, index (index)}
-                        <tr
-                          data-row-index={index}
-                          class:hovered={hoverSelection?.datasetId === activeSampleTabDataset.id && hoverSelection.pointIndex === index}
-                          on:mouseenter={() => setHoverSelection(activeSampleTabDataset.id, index)}
-                          on:mouseleave={() => setHoverSelection(activeSampleTabDataset.id, null)}
-                        >
-                          <td>{point}</td>
-                          <td>{activeSampleTabDataset.data.ordinateOriginal[index]}</td>
-                          <td>{activeSampleTabDataset.data.ordinateModified[index]}</td>
-                        </tr>
-                      {/each}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            {:else}
-              <div class="sample-table-wrap peak-table-wrap">
-                <h3>Peak Assignments</h3>
-                <div class="sample-empty">
-                  Peak assignment tools can be added here. This tab is ready for annotations and peak labels.
-                </div>
-              </div>
-            {/if}
-          </div>
-        {/if}
-
-        <div class="script-panel" class:hidden={activeWorkspaceTab !== 'script_view'}>
-          <div class="sync-banner" data-state={$projectStore.syncMode}>
-            {#if $projectStore.syncMode === 'desync_active'}
-              GUI Sync Disabled. Manual edits active.
-            {:else}
-              GUI synchronized. Style and pipeline edits regenerate script automatically.
-            {/if}
-          </div>
-
-          {#if $projectStore.workerLastError}
-            <div class="script-error-banner">{$projectStore.workerLastError}</div>
-          {/if}
-
-          <div bind:this={scriptEditorHostEl} class="script-editor" aria-label="Python script editor"></div>
-
-          <div class="script-actions">
-            <label class="autoexecute-toggle">
-              <input type="checkbox" checked={scriptAutoExecute} on:change={handleAutoExecuteToggle} />
-              Autoexecute
-            </label>
-            <button type="button" class="run" disabled={scriptAutoExecute || scriptExecuting} on:click={() => void executeScript()}>
-              {scriptExecuting ? 'Executing...' : 'Execute'}
-            </button>
-            <button type="button" class="ghost" on:click={() => projectStore.revertScriptToGuiState()}>
-              Revert To GUI State
-            </button>
-          </div>
-        </div>
-      </section>
-    </main>
+    <WorkspaceMain
+      bind:this={workspaceMain}
+      {visibleDatasets}
+      selectedSpectrumId={plotSelectedSpectrumId}
+      {activeWorkspaceTab}
+      {activeSampleSubView}
+      {activeSampleTabDataset}
+      {openedSampleTabs}
+      {bottomPanelOpen}
+      {bottomPanelHeight}
+      highlightedDatasetId={explorerHoverDatasetId}
+      onClearFileSelection={clearFileSelection}
+      onStartBottomResize={(event) => startResize('bottom', event)}
+      onOpenSubTab={openSampleSubTab}
+      onActivateScript={activateScriptTab}
+      onCloseTab={closeSampleTab}
+      onCloseBottomPanel={() => { bottomPanelOpen = false }}
+    />
 
     <button
       type="button"
       class="resizer-col"
+      class:hidden={!rightPanelOpen}
       aria-label="Resize right panel"
       on:mousedown={(event) => startResize('right', event)}
     ></button>
 
-    <aside class="right-sidebar">
-      {#if activeWorkspaceTab !== 'script_view' && activeSampleTabDataset}
-        <section class="sample-settings">
-          <header class="sample-settings-header">
-            {#if editingTitle}
-              <input
-                bind:this={titleInputEl}
-                class="sample-title-input"
-                type="text"
-                bind:value={titleDraft}
-                on:blur={commitTitleEdit}
-                on:keydown={handleTitleKeydown}
-              />
-            {:else}
-              <h2 on:dblclick={startTitleEdit}>{activeSampleTabDataset.style.label}</h2>
-            {/if}
-          </header>
-
-          <section class="expandable-section" class:open={rightPanelSection === 'general'}>
-            <button type="button" class="expandable-toggle" on:click={() => { rightPanelSection = rightPanelSection === 'general' ? null : 'general' }}>
-              General
-            </button>
-            {#if rightPanelSection === 'general'}
-              <div class="expandable-body">
-                <label>
-                  File path
-                  <input type="text" value={activeSampleTabDataset.sourcePath} on:input={updateSourcePath} />
-                </label>
-                <label>
-                  Spectrum type
-                  <select value={activeSampleTabDataset.spectrumType} on:change={updateSpectrumType}>
-                    <option value="uv-vis">UV-Vis</option>
-                    <option value="ir">IR</option>
-                    <option value="raman">Raman</option>
-                  </select>
-                </label>
-                <label>
-                  X units
-                  <input type="text" value={activeSampleTabDataset.units.x} on:input={updateUnitsX} />
-                </label>
-                <label>
-                  Y units
-                  <input type="text" value={activeSampleTabDataset.units.y} on:input={updateUnitsY} />
-                </label>
-              </div>
-            {/if}
-          </section>
-
-          <section class="expandable-section" class:open={rightPanelSection === 'style'}>
-            <button type="button" class="expandable-toggle" on:click={() => { rightPanelSection = rightPanelSection === 'style' ? null : 'style' }}>
-              Style Settings
-            </button>
-            {#if rightPanelSection === 'style'}
-              <div class="expandable-body">
-            <label>
-              Line Color
-              <input type="color" value={activeSampleTabDataset.style.lineColor} on:input={updateColor} />
-            </label>
-            <label>
-              Line Width
-              <input
-                type="range"
-                min="1"
-                max="6"
-                step="0.5"
-                value={activeSampleTabDataset.style.lineWidth}
-                on:input={updateWidth}
-              />
-            </label>
-            <button type="button" class="run" on:click={() => projectStore.rerunPipeline(activeSampleTabDataset.id)}>
-              Run Pipeline in Pyodide
-            </button>
-              </div>
-            {/if}
-          </section>
-
-          <section class="expandable-section" class:open={rightPanelSection === 'pipeline'}>
-            <button type="button" class="expandable-toggle" on:click={() => { rightPanelSection = rightPanelSection === 'pipeline' ? null : 'pipeline' }}>
-              Pipeline Settings
-            </button>
-            {#if rightPanelSection === 'pipeline'}
-              <div class="expandable-body">
-            {#each activeSampleTabDataset.pipeline as transform (transform.id)}
-              <div class="transform-card">
-                <div class="transform-top">
-                  <label class="toggle-label">
-                    <input
-                      type="checkbox"
-                      checked={transform.enabled}
-                      on:change={(event) =>
-                        updateTransformEnabled(
-                          activeSampleTabDataset.id,
-                          transform.id,
-                          (event.target as HTMLInputElement).checked,
-                        )}
-                    />
-                    <span>{transform.type}</span>
-                  </label>
-
-                  <select
-                    value={transform.scope}
-                    on:change={(event) =>
-                      updateTransformScope(
-                        activeSampleTabDataset.id,
-                        transform.id,
-                        (event.target as HTMLSelectElement).value as 'no' | 'individual' | 'global',
-                      )}
-                  >
-                    <option value="no">No</option>
-                    <option value="individual">Individual</option>
-                    <option value="global">Global</option>
-                  </select>
-                </div>
-
-                {#if transform.type === 'smoothing'}
-                  <div class="transform-grid">
-                    <label>
-                      window
-                      <input
-                        type="number"
-                        min="3"
-                        step="2"
-                        value={Number(transform.params.window_length ?? 15)}
-                        on:change={(event) =>
-                          updateTransformParam(
-                            activeSampleTabDataset.id,
-                            transform.id,
-                            { window_length: Number((event.target as HTMLInputElement).value) },
-                            transform.scope,
-                          )}
-                      />
-                    </label>
-                    <label>
-                      polyorder
-                      <input
-                        type="number"
-                        min="1"
-                        value={Number(transform.params.polyorder ?? 2)}
-                        on:change={(event) =>
-                          updateTransformParam(
-                            activeSampleTabDataset.id,
-                            transform.id,
-                            { polyorder: Number((event.target as HTMLInputElement).value) },
-                            transform.scope,
-                          )}
-                      />
-                    </label>
-                  </div>
-                {/if}
-
-                {#if transform.type === 'normalization'}
-                  <label>
-                    mode
-                    <select
-                      value={String(transform.params.mode ?? 'minmax')}
-                      on:change={(event) =>
-                        updateTransformParam(
-                          activeSampleTabDataset.id,
-                          transform.id,
-                          { mode: (event.target as HTMLSelectElement).value },
-                          transform.scope,
-                        )}
-                    >
-                      <option value="minmax">MinMax</option>
-                      <option value="vector">Vector</option>
-                      <option value="area">Area</option>
-                      <option value="peak">Peak</option>
-                    </select>
-                  </label>
-                {/if}
-
-                {#if transform.type === 'derivative'}
-                  <label>
-                    order
-                    <input
-                      type="number"
-                      min="1"
-                      max="2"
-                      value={Number(transform.params.order ?? 1)}
-                      on:change={(event) =>
-                        updateTransformParam(
-                          activeSampleTabDataset.id,
-                          transform.id,
-                          { order: Number((event.target as HTMLInputElement).value) },
-                          transform.scope,
-                        )}
-                    />
-                  </label>
-                {/if}
-
-                {#if transform.type === 'baseline'}
-                  <label>
-                    poly order
-                    <input
-                      type="number"
-                      min="1"
-                      max="6"
-                      value={Number(transform.params.order ?? 3)}
-                      on:change={(event) =>
-                        updateTransformParam(
-                          activeSampleTabDataset.id,
-                          transform.id,
-                          { order: Number((event.target as HTMLInputElement).value) },
-                          transform.scope,
-                        )}
-                    />
-                  </label>
-                {/if}
-
-                {#if transform.type === 'crop'}
-                  <div class="transform-grid">
-                    <label>
-                      x min
-                      <input
-                        type="number"
-                        value={Number(transform.params.x_min ?? 200)}
-                        on:change={(event) =>
-                          updateTransformParam(
-                            activeSampleTabDataset.id,
-                            transform.id,
-                            { x_min: Number((event.target as HTMLInputElement).value) },
-                            transform.scope,
-                          )}
-                      />
-                    </label>
-                    <label>
-                      x max
-                      <input
-                        type="number"
-                        value={Number(transform.params.x_max ?? 800)}
-                        on:change={(event) =>
-                          updateTransformParam(
-                            activeSampleTabDataset.id,
-                            transform.id,
-                            { x_max: Number((event.target as HTMLInputElement).value) },
-                            transform.scope,
-                          )}
-                      />
-                    </label>
-                  </div>
-                {/if}
-              </div>
-            {/each}
-              </div>
-            {/if}
-          </section>
-        </section>
-      {/if}
-    </aside>
+    <SettingsSidebar
+      open={rightPanelOpen}
+      dataset={rightPanelDataset}
+      datasetCount={$projectStore.datasets.length}
+      onClose={() => { rightPanelOpen = false }}
+      onBackToGeneral={() => { rightPanelDatasetId = null }}
+      onRename={renameDataset}
+      onUpdateStyle={updateDatasetStyle}
+      onUpdateMetadata={updateDatasetMetadata}
+      onConvertAbscissa={convertDatasetAbscissa}
+      onRerunPipeline={(datasetId) => projectStore.rerunPipeline(datasetId)}
+      onTransformEnabled={updateTransformEnabled}
+      onTransformScope={updateTransformScope}
+      onTransformParam={updateTransformParam}
+      onApplyPalette={(paletteId) => applyGlobalPalette(globalContext, paletteId)}
+      onApplyLineWidth={(width) => applyGlobalLineWidth(globalContext, width)}
+      onApplyNormalization={(mode: NormalizationMode) => applyGlobalNormalization(globalContext, mode)}
+      onApplySmoothing={(windowLength, polyorder) => applyGlobalSmoothing(globalContext, windowLength, polyorder)}
+      onApplyAxisMetadata={(metadata) => applyGlobalAxisMetadata(globalContext, metadata)}
+    />
   </div>
 
   {#if importError}
     <div class="toast toast-error">{importError}</div>
   {/if}
 </div>
+
+{#if exportOpen}
+  <div class="confirm-backdrop" role="presentation">
+    <div class="confirm-modal" role="dialog" aria-modal="true" aria-label="Export options">
+      <h3>Export project</h3>
+      <div class="export-options">
+        <label>
+          <input type="radio" bind:group={exportFormat} value="html" />
+          HTML report
+        </label>
+        <label>
+          <input type="radio" bind:group={exportFormat} value="csv" />
+          CSV summary
+        </label>
+        <label>
+          <input type="radio" bind:group={exportFormat} value="json" />
+          JSON snapshot
+        </label>
+      </div>
+      <div class="confirm-actions">
+        <button type="button" class="ghost" on:click={() => { exportOpen = false }}>Cancel</button>
+        <button type="button" class="run" on:click={confirmExport}>Download</button>
+      </div>
+    </div>
+  </div>
+{/if}
 
 <ImportWizard
   open={importOpen}
@@ -1295,32 +505,12 @@
   on:import={handleImport}
 />
 
-{#if overwriteModalOpen}
-  <div class="confirm-backdrop" role="presentation">
-    <div class="confirm-modal" role="dialog" aria-modal="true" aria-label="Reset manual edits">
-      <h3>Reset Manual Edits?</h3>
-      <p>
-        Modifying GUI controls will overwrite your custom Python script and return to synchronized mode.
-      </p>
-      <div class="confirm-actions">
-        <button type="button" class="ghost" on:click={cancelOverwrite}>Cancel</button>
-        <button type="button" class="run" on:click={confirmOverwriteAndApply}>Overwrite and Continue</button>
-      </div>
-    </div>
-  </div>
-{/if}
-
-{#if globalScopeModalOpen}
-  <div class="confirm-backdrop" role="presentation">
-    <div class="confirm-modal" role="dialog" aria-modal="true" aria-label="Global transform warning">
-      <h3>Apply To All Spectra?</h3>
-      <p>
-        Warning: You are about to override transformation settings for {$projectStore.datasets.length} loaded spectra. Continue?
-      </p>
-      <div class="confirm-actions">
-        <button type="button" class="ghost" on:click={cancelGlobalScopeApply}>Cancel</button>
-        <button type="button" class="run" on:click={confirmGlobalScopeApply}>Continue</button>
-      </div>
-    </div>
-  </div>
-{/if}
+<ConfirmDialogs
+  overwriteOpen={overwriteModalOpen}
+  globalScopeOpen={globalScopeModalOpen}
+  datasetCount={$projectStore.datasets.length}
+  onCancelOverwrite={cancelOverwrite}
+  onConfirmOverwrite={confirmOverwriteAndApply}
+  onCancelGlobal={cancelGlobalScopeApply}
+  onConfirmGlobal={confirmGlobalScopeApply}
+/>

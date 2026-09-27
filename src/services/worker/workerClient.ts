@@ -17,7 +17,8 @@ function createId(prefix: string): string {
 export class WorkerClient {
   private readonly endpoint: WorkerEndpoint
   private readonly pending = new Map<string, PendingResolver>()
-  private currentExecutionRequestId: string | null = null
+  private initPromise: Promise<WorkerResponse> | null = null
+  private executionQueue: Promise<unknown> = Promise.resolve()
 
   constructor(endpoint: WorkerEndpoint) {
     this.endpoint = endpoint
@@ -27,50 +28,15 @@ export class WorkerClient {
   }
 
   async init(): Promise<WorkerResponse> {
-    const requestId = createId('init')
-    const request: WorkerRequest = {
-      type: 'init',
-      requestId,
-    }
-    return this.send(request)
-  }
-
-  async executePipeline(input: {
-    spectrumId: string
-    abscissa: number[]
-    ordinate: number[]
-    pipelineCode: string
-    preferFloat32: boolean
-  }): Promise<WorkerResponse> {
-    if (this.currentExecutionRequestId) {
-      const cancelRequest: WorkerRequest = {
-        type: 'cancel',
-        requestId: createId('cancel'),
-        targetRequestId: this.currentExecutionRequestId,
+    if (!this.initPromise) {
+      const requestId = createId('init')
+      const request: WorkerRequest = {
+        type: 'init',
+        requestId,
       }
-      this.endpoint.postMessage(cancelRequest)
+      this.initPromise = this.send(request)
     }
-
-    const requestId = createId('exec')
-    this.currentExecutionRequestId = requestId
-
-    const request: WorkerRequest = {
-      type: 'execute_pipeline',
-      requestId,
-      spectrumId: input.spectrumId,
-      abscissa: input.abscissa,
-      ordinate: input.ordinate,
-      pipelineCode: input.pipelineCode,
-      preferFloat32: input.preferFloat32,
-    }
-
-    const response = await this.send(request)
-
-    if (this.currentExecutionRequestId === requestId) {
-      this.currentExecutionRequestId = null
-    }
-
-    return response
+    return this.initPromise
   }
 
   async executeScript(input: {
@@ -99,22 +65,21 @@ export class WorkerClient {
         scatterSymbol: string
         visible?: boolean
       }
+      peakDetectionMode?: 'maxima' | 'minima'
+      peakDetection?: {
+        prominence: number
+        minDistance: number
+        minHeight: number | null
+        mode: 'maxima' | 'minima'
+      }
     }
     scriptCode: string
+    scriptFiles?: Record<string, string>
     preferFloat32: boolean
   }): Promise<WorkerResponse> {
-    if (this.currentExecutionRequestId) {
-      const cancelRequest: WorkerRequest = {
-        type: 'cancel',
-        requestId: createId('cancel'),
-        targetRequestId: this.currentExecutionRequestId,
-      }
-      this.endpoint.postMessage(cancelRequest)
-    }
+    await this.init()
 
     const requestId = createId('exec_script')
-    this.currentExecutionRequestId = requestId
-
     const request: WorkerRequest = {
       type: 'execute_script',
       requestId,
@@ -123,16 +88,69 @@ export class WorkerClient {
       ordinate: input.ordinate,
       metadata: input.metadata,
       scriptCode: input.scriptCode,
+      scriptFiles: input.scriptFiles,
       preferFloat32: input.preferFloat32,
     }
 
-    const response = await this.send(request)
+    return this.enqueueRequest(request)
+  }
 
-    if (this.currentExecutionRequestId === requestId) {
-      this.currentExecutionRequestId = null
+  async detectPeaks(input: {
+    spectrumId: string
+    abscissa: number[]
+    ordinate: number[]
+    prominence: number
+    minDistance: number
+    minHeight: number | null
+    mode: 'maxima' | 'minima'
+  }): Promise<WorkerResponse> {
+    await this.init()
+
+    const request: WorkerRequest = {
+      type: 'detect_peaks',
+      requestId: createId('detect_peaks'),
+      spectrumId: input.spectrumId,
+      abscissa: input.abscissa,
+      ordinate: input.ordinate,
+      prominence: input.prominence,
+      minDistance: input.minDistance,
+      minHeight: input.minHeight,
+      mode: input.mode,
     }
 
-    return response
+    return this.enqueueRequest(request)
+  }
+
+  async computePeakHeatmap(input: {
+    spectrumId: string
+    abscissa: number[]
+    ordinate: number[]
+    prominenceValues: number[]
+    distanceValues: number[]
+    minHeight: number | null
+    mode: 'maxima' | 'minima'
+  }): Promise<WorkerResponse> {
+    await this.init()
+
+    const request: WorkerRequest = {
+      type: 'peak_heatmap',
+      requestId: createId('peak_heatmap'),
+      spectrumId: input.spectrumId,
+      abscissa: input.abscissa,
+      ordinate: input.ordinate,
+      prominenceValues: input.prominenceValues,
+      distanceValues: input.distanceValues,
+      minHeight: input.minHeight,
+      mode: input.mode,
+    }
+
+    return this.enqueueRequest(request)
+  }
+
+  private enqueueRequest(request: WorkerRequest): Promise<WorkerResponse> {
+    const queued = this.executionQueue.then(() => this.send(request), () => this.send(request))
+    this.executionQueue = queued.then(() => undefined, () => undefined)
+    return queued
   }
 
   private send(request: WorkerRequest): Promise<WorkerResponse> {
@@ -160,6 +178,17 @@ export class WorkerClient {
 }
 
 function createDedicatedWorkerEndpoint(): WorkerEndpoint {
+  if (typeof Worker === 'undefined') {
+    return {
+      postMessage() {
+        // No-op in non-browser test environments. Real browser execution still uses a real worker.
+      },
+      subscribe() {
+        // No-op in non-browser test environments. Real browser execution still uses a real worker.
+      },
+    }
+  }
+
   const worker = new Worker(new URL('../../worker/pyodide.worker.ts', import.meta.url), {
     type: 'module',
   })

@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx'
+import type { SpectrumType } from '../../types/project'
 
 export interface ImportOptions {
   delimiter: ',' | ';' | '\t' | '|' | 'custom'
@@ -8,11 +9,17 @@ export interface ImportOptions {
   hasHeader: boolean
   xColumn: number
   yColumn: number
+  spectrumType?: 'auto' | SpectrumType
+  seriesLabelOverrides?: string[]
+  seriesLabelOverridesByFile?: Record<number, string[]>
 }
 
 export interface ParsedSpectrum {
   abscissa: number[]
   ordinate: number[]
+  xUnit?: string
+  yUnit?: string
+  spectrumType?: SpectrumType
 }
 
 export interface ParsedSpectrumSeries extends ParsedSpectrum {
@@ -43,6 +50,39 @@ function parseNumber(raw: string, decimalSeparator: '.' | ','): number | null {
 
 function splitLines(content: string): string[] {
   return content.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n')
+}
+
+function normalizeUnitToken(value: string): string {
+  return value.toLowerCase().replace(/\s+/g, '').replace(/\u00b9|\^|⁻|−/g, '')
+}
+
+function inferSpectrumType(xUnit?: string, yUnit?: string, values?: number[]): SpectrumType | undefined {
+  const combined = [xUnit ?? '', yUnit ?? '', ...((values ?? []).slice(0, 4).map(String))].join(' ')
+  const prepared = normalizeUnitToken(combined)
+
+  if (/cm[-]?[0-9]?\^?1|wavenumber|1\/cm|1cm|cm[-]?[0-9]?/i.test(prepared) || /cm[-]?[0-9]?/i.test(xUnit ?? '')) {
+    return 'ir'
+  }
+
+  if (/(raman|raman shift|shift)/i.test(prepared)) {
+    return 'raman'
+  }
+
+  return undefined
+}
+
+function inferHeaderUnit(raw: string): string | undefined {
+  const value = raw.trim()
+  if (!value) {
+    return undefined
+  }
+
+  const match = value.match(/\(([^)]+)\)$/)
+  if (match?.[1]) {
+    return match[1].trim()
+  }
+
+  return value
 }
 
 function parseDelimitedRows(content: string, options: ImportOptions): string[][] {
@@ -106,13 +146,22 @@ function buildSeriesFromRows(
       ordinate.push(y)
     }
 
-    const headerLabel = String(headerRow[yColumn] ?? '').trim()
+    const xHeader = String(headerRow[options.xColumn] ?? '').trim()
+    const yHeader = String(headerRow[yColumn] ?? '').trim()
+    const inferredXUnit = inferHeaderUnit(xHeader)
+    const inferredYUnit = inferHeaderUnit(yHeader)
+
+    const headerLabel = yHeader.length > 0 ? yHeader : `Series ${yColumn + 1}`
     const label = headerLabel.length > 0 ? headerLabel : `Series ${yColumn + 1}`
+    const detectedSpectrumType = inferSpectrumType(inferredXUnit, inferredYUnit, abscissa)
 
     return {
       label,
       abscissa,
       ordinate,
+      xUnit: inferredXUnit,
+      yUnit: inferredYUnit,
+      spectrumType: detectedSpectrumType,
     }
   })
 
@@ -138,6 +187,9 @@ export function parseDelimited(content: string, options: ImportOptions): ParsedS
   return {
     abscissa: first.abscissa,
     ordinate: first.ordinate,
+    xUnit: first.xUnit,
+    yUnit: first.yUnit,
+    spectrumType: first.spectrumType,
   }
 }
 
@@ -172,5 +224,8 @@ export function parseXlsx(arrayBuffer: ArrayBuffer, options: ImportOptions): Par
   return {
     abscissa: first.abscissa,
     ordinate: first.ordinate,
+    xUnit: first.xUnit,
+    yUnit: first.yUnit,
+    spectrumType: first.spectrumType,
   }
 }

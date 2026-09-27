@@ -21,6 +21,8 @@
   let activeIndex = 0
   let tableRows: string[][] = []
   let seriesPreview: ParsedSpectrumSeries[] = []
+  let seriesLabels: string[] = []
+  let seriesLabelsByFile: Record<number, string[]> = {}
   let loadingPreview = false
   let previewError = ''
 
@@ -28,6 +30,10 @@
 
   $: if (activeIndex >= files.length) {
     activeIndex = files.length > 0 ? files.length - 1 : 0
+  }
+
+  $: if (open && files.length > 0 && seriesLabelsByFile[activeIndex]) {
+    seriesLabels = seriesLabelsByFile[activeIndex]
   }
 
   $: previewDependency = `${open}|${files.length}|${activeIndex}|${options.delimiter}|${options.customDelimiter ?? ''}|${options.decimalSeparator}|${options.startRow}|${options.hasHeader}|${options.xColumn}`
@@ -76,6 +82,7 @@
     if (!file) {
       tableRows = []
       seriesPreview = []
+      seriesLabels = []
       previewError = ''
       return
     }
@@ -91,6 +98,8 @@
         ? parseXlsxCollection(await file.arrayBuffer(), options)
         : parseDelimitedCollection(await file.text(), options)
       seriesPreview = collection.series
+      seriesLabels = collection.series.map((series, index) => seriesLabelsByFile[activeIndex]?.[index] ?? series.label)
+      seriesLabelsByFile = { ...seriesLabelsByFile, [activeIndex]: seriesLabels }
     } catch (error) {
       previewError = error instanceof Error ? error.message : 'Preview failed'
       seriesPreview = []
@@ -107,7 +116,7 @@
 
     dispatch('import', {
       files,
-      options,
+      options: { ...options, seriesLabelOverridesByFile: seriesLabelsByFile },
     })
   }
 
@@ -212,7 +221,17 @@
         </label>
 
         <label>
-          X Column
+          Spectrum Type
+          <select bind:value={options.spectrumType}>
+            <option value="auto">Auto-detect</option>
+            <option value="uv-vis">UV-Vis</option>
+            <option value="ir">IR</option>
+            <option value="raman">Raman</option>
+          </select>
+        </label>
+
+        <label>
+          Abscissa Column
           <input type="number" min="0" bind:value={options.xColumn} />
         </label>
       </div>
@@ -250,13 +269,22 @@
           </svg>
           <div class="series-legend">
             {#each seriesPreview as series, index (series.label + index)}
-              <span class="legend-item">
+              <label class="legend-item">
                 <span
                   class="legend-dot"
                   style={`background:${previewPalette[index % previewPalette.length]};`}
                 ></span>
-                {series.label}
-              </span>
+                <input
+                  type="text"
+                  aria-label={`Series ${index + 1} name`}
+                  value={seriesLabels[index] ?? series.label}
+                  on:input={(event) => {
+                    seriesLabels[index] = (event.target as HTMLInputElement).value
+                    seriesLabels = seriesLabels
+                    seriesLabelsByFile = { ...seriesLabelsByFile, [activeIndex]: seriesLabels }
+                  }}
+                />
+              </label>
             {/each}
           </div>
         </div>
@@ -433,10 +461,24 @@
     gap: 6px;
   }
 
+  .legend-item input {
+    width: 150px;
+    padding: 4px 6px;
+    font-size: 0.78rem;
+  }
+
   .legend-dot {
     width: 8px;
     height: 8px;
     border-radius: 50%;
+    flex: 0 0 auto;
+  }
+
+  .legend-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex: 0 0 auto;
   }
 
   .status {
