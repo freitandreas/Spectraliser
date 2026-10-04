@@ -1,5 +1,5 @@
-import type { SpectrumType } from '../types/project'
-import { escapeHtml, quantityHtml, quantityPlain, quantitySymbol, type QuantityNotation } from './quantityNotation'
+import type { SpectrumDataset, SpectrumType } from '../types/project'
+import { escapeHtml, quantityHtml, quantityPlain, quantityTex, type QuantityNotation } from './quantityNotation'
 
 export const BLANK_UNIT = ''
 
@@ -57,12 +57,32 @@ export function axisDefaultsFor(spectrumType: SpectrumType): AxisMetadata {
   return SPECTRUM_AXIS_DEFAULTS[spectrumType] ?? SPECTRUM_AXIS_DEFAULTS['uv-vis']
 }
 
-/** Percent ordinates hold the same values scaled by 100. */
-export function percentScaleFactor(fromUnit: string, toUnit: string): number | null {
-  const from = isPercentUnit(fromUnit)
-  const to = isPercentUnit(toUnit)
-  if (from === to) return null
-  return to ? 100 : 0.01
+type OrdinateScale = 'fraction' | 'percent' | 'arbitrary'
+
+function ordinateScale(unit: string): OrdinateScale {
+  if (isPercentUnit(unit)) return 'percent'
+  return ['', '1', '-'].includes(canonicalUnit(unit).toLowerCase()) ? 'fraction' : 'arbitrary'
+}
+
+/**
+ * Factor turning ordinate values in `fromUnit` into `toUnit`, or null when the values
+ * stay as they are. Percent and dimensionless fractions differ by 100; arbitrary units
+ * (a.u., counts, …) carry no absolute scale, so converting them to or from percent is
+ * rejected instead of inventing one.
+ */
+export function ordinateUnitFactor(fromUnit: string, toUnit: string): number | null {
+  const from = ordinateScale(fromUnit)
+  const to = ordinateScale(toUnit)
+  if (from === to || (from !== 'percent' && to !== 'percent')) return null
+  if (from === 'arbitrary' || to === 'arbitrary') {
+    throw new Error(`Ordinate values in ${formatUnit(fromUnit) || '(no unit)'} have no absolute scale and cannot be converted to ${formatUnit(toUnit) || '(no unit)'}.`)
+  }
+  return to === 'percent' ? 100 : 0.01
+}
+
+/** Modified data of a sample with an enabled normalisation step is a normalised quantity (subscript "norm"). */
+export function isNormalised(dataset: Pick<SpectrumDataset, 'pipeline'>): boolean {
+  return dataset.pipeline.some((step) => step.type === 'normalization' && step.enabled)
 }
 
 export type AxisLabelFormat = 'slash' | 'fraction' | 'in'
@@ -72,10 +92,6 @@ export const AXIS_LABEL_FORMATS: Array<{ id: AxisLabelFormat; label: string; exa
   { id: 'fraction', label: 'Fraction', example: '\\frac{Wavelength}{nm}' },
   { id: 'in', label: 'Quantity in unit', example: 'Wavelength in nm' },
 ]
-
-function texText(value: string): string {
-  return value.replace(/[\\{}$%&#_^~]/g, (char) => (char === '\\' ? '\\backslash ' : `\\${char}`))
-}
 
 function texUnit(unit: string): string {
   return canonicalUnit(unit)
@@ -90,8 +106,9 @@ export type AxisLabelTarget = 'plotly' | 'plain'
 
 /**
  * Renders an axis title in the selected IUPAC-style form. Dimensionless axes show the
- * quantity alone. The fraction form is TeX for Plotly's MathJax renderer; the `plain`
- * target never emits markup or TeX, for WebGL titles, CSV headers and form examples.
+ * quantity alone; `subscript` adds a descriptive subscript such as "norm". The fraction
+ * form is TeX for Plotly's MathJax renderer; the `plain` target never emits markup or
+ * TeX, for WebGL titles, CSV headers and form examples.
  */
 export function axisLabel(
   quantity: string,
@@ -99,16 +116,15 @@ export function axisLabel(
   format: AxisLabelFormat = 'slash',
   notation: QuantityNotation = 'name',
   target: AxisLabelTarget = 'plain',
+  subscript?: string,
 ): string {
   const formatted = formatUnit(unit).trim()
-  const symbol = quantitySymbol(quantity, notation)
-  const name = target === 'plain' ? quantityPlain(quantity, notation) : quantityHtml(quantity, notation)
+  const name = target === 'plain' ? quantityPlain(quantity, notation, subscript) : quantityHtml(quantity, notation, subscript)
   if (!formatted) return name
   const unitText = target === 'plain' ? formatted : escapeHtml(formatted)
   if (format === 'in') return `${name} in ${unitText}`
   if (format === 'fraction' && target === 'plotly') {
-    const numerator = symbol ? symbol.tex : `\\text{${texText(quantity)}}`
-    return `$\\frac{${numerator}}{\\mathrm{${texUnit(unit)}}}$`
+    return `$\\frac{${quantityTex(quantity, notation, subscript)}}{\\mathrm{${texUnit(unit)}}}$`
   }
   return `${name} / ${unitText}`
 }

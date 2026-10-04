@@ -1,8 +1,8 @@
 import type { SpectrumDataset } from '../../types/project'
 import type { PlotMode, PlotStylePreferences } from '../../services/startupPreferences'
-import { axisLabel, isPercentUnit, type AxisLabelFormat, type AxisLabelTarget } from '../../services/spectrumPresets'
+import { axisLabel, isNormalised, isPercentUnit, type AxisLabelFormat, type AxisLabelTarget } from '../../services/spectrumPresets'
 import type { QuantityNotation } from '../../services/quantityNotation'
-import { resolveSeriesCoordinates, type ResolvedSeriesCoordinates } from '../../services/seriesCoordinates'
+import { resolveSeriesAxis, type ResolvedSeriesCoordinates } from '../../services/metadataFields'
 import { buildLineTraces, buildPeakAnnotations, buildPeakTrace, unitSuffix } from './plotTraces'
 import { buildSeriesGrid, type SeriesGrid } from './seriesGrid'
 import { buildGridBase, type GridBase } from './gridBaseLayer'
@@ -56,11 +56,12 @@ function axisTitles(
   target: AxisLabelTarget = 'plotly',
 ): AxisTitles {
   const units = datasets[0]?.units
+  const ordinateSubscript = datasets.length > 0 && datasets.every(isNormalised) ? 'norm' : undefined
   return {
     x: axisLabel(units?.xQuantity ?? 'Abscissa', units?.x ?? '', format, notation, target),
-    y: axisLabel(units?.yQuantity ?? 'Ordinate', units?.y ?? '', format, notation, target),
-    series: coordinates.kind === 'time'
-      ? axisLabel('Time', coordinates.unit, format, notation, target)
+    y: axisLabel(units?.yQuantity ?? 'Ordinate', units?.y ?? '', format, notation, target, ordinateSubscript),
+    series: coordinates.kind === 'measured'
+      ? axisLabel(coordinates.quantity, coordinates.unit, format, notation, target)
       : axisLabel('Series number', '', format, notation, target),
   }
 }
@@ -101,16 +102,19 @@ function baseLayout(): Record<string, unknown> {
 }
 
 function coordinateNotices(coordinates: ResolvedSeriesCoordinates, interpolationRequested: boolean): string[] {
-  if (coordinates.kind === 'time') return []
+  if (coordinates.kind === 'measured') return []
   const notices: string[] = []
-  if (coordinates.duplicates) {
-    notices.push('Several series share the same time coordinate, so series are placed by their order instead.')
+  const quantity = coordinates.quantity.toLowerCase()
+  const shown = coordinates.missing.slice(0, 3).join(', ')
+  const more = coordinates.missing.length > 3 ? ` and ${coordinates.missing.length - 3} more` : ''
+  if (coordinates.problem === 'duplicates') {
+    notices.push(`Several series share the same ${quantity}, so series are placed by their order instead.`)
+  } else if (coordinates.problem === 'units') {
+    notices.push(`The ${quantity} of ${shown}${more} cannot be converted to the axis unit. Series are placed by their order.`)
   } else {
-    const shown = coordinates.missing.slice(0, 3).join(', ')
-    const more = coordinates.missing.length > 3 ? ` and ${coordinates.missing.length - 3} more` : ''
-    notices.push(`No time coordinate found for ${shown}${more}. Series are placed by their order; set times in Sample Settings.`)
+    notices.push(`No ${quantity} found for ${shown}${more}. Series are placed by their order; add it in the metadata box of the Data tab.`)
   }
-  if (interpolationRequested) notices.push('Interpolation needs a time coordinate for every visible series and is paused.')
+  if (interpolationRequested) notices.push(`Interpolation needs a ${quantity} for every visible series and is paused.`)
   return notices
 }
 
@@ -168,13 +172,18 @@ export function buildPlotFigure(input: PlotFigureInput): PlotFigure {
   const { datasets, plotStyle } = input
   const requestedMode = plotStyle.plotMode
   const interpolation = plotStyle.seriesInterpolation
-  const coordinates = resolveSeriesCoordinates(
-    datasets.map((dataset) => ({ label: dataset.style.label, seriesCoordinate: dataset.seriesCoordinate })),
+  const coordinates = resolveSeriesAxis(
+    datasets.map((dataset) => ({ label: dataset.style.label, metadata: dataset.experimentMetadata })),
+    plotStyle.seriesField,
     plotStyle.seriesUnit,
   )
   const multiSeries = datasets.length >= 2
   const notices: string[] = multiSeries ? coordinateNotices(coordinates, interpolation.enabled) : []
-  const steps = interpolation.enabled && coordinates.kind === 'time' ? interpolation.steps : 0
+  const normalisedCount = datasets.filter(isNormalised).length
+  if (normalisedCount > 0 && normalisedCount < datasets.length) {
+    notices.push(`Normalisation is enabled for ${normalisedCount} of ${datasets.length} visible series; the ordinate label shows the unnormalised quantity.`)
+  }
+  const steps = interpolation.enabled && coordinates.kind === 'measured' ? interpolation.steps : 0
   const format = plotStyle.axisLabelFormat
   const notation = plotStyle.quantityNotation ?? 'name'
   // Hover labels are plain SVG text, so they always use the inline form.

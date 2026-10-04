@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { MetadataPatch, StylePatch } from '../../state/datasetActions'
   import type { ComputePrecision, PlotStylePreferences } from '../../services/startupPreferences'
   import type { SpectrumDataset } from '../../types/project'
   import {
@@ -30,8 +31,8 @@
   export let generalContext: GeneralSettingsContext
   export let onClose: () => void
   export let onRename: (datasetId: string, label: string) => void
-  export let onUpdateStyle: (datasetId: string, patch: Record<string, unknown>) => void
-  export let onUpdateMetadata: (datasetId: string, patch: Record<string, unknown>) => void
+  export let onUpdateStyle: (datasetId: string, patch: StylePatch) => void
+  export let onUpdateMetadata: (datasetId: string, patch: MetadataPatch) => void
   export let onRerunPipeline: (datasetId: string) => void
   export let onTransformEnabled: (datasetId: string, transformId: string, enabled: boolean) => void
   export let onTransformParam: (datasetId: string, transformId: string, params: Record<string, number | string | boolean>) => void

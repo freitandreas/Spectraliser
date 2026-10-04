@@ -1,7 +1,8 @@
 import type { SpectrumDataset } from '../types/project'
 import type { ComputePrecision } from '../services/startupPreferences'
+import { arrayId } from '../services/arrayIdentity'
 
-/** FNV-1a (32 bit, two seeds) keeps cache keys short even for large spectra. */
+/** FNV-1a (32 bit, two seeds) keeps cache keys short even for long script files. */
 function hashString(value: string): string {
   let a = 0x811c9dc5
   let b = 0x01000193 ^ value.length
@@ -35,8 +36,8 @@ export function scriptExecutionKey(
     units: [dataset.units.x, dataset.units.y, dataset.units.xQuantity ?? '', dataset.units.yQuantity ?? ''],
     pipeline: dataset.pipeline,
     peakDetection: dataset.peakDetection ?? null,
-    abscissa: dataset.data.abscissa,
-    ordinate: dataset.data.ordinateOriginal,
+    abscissa: arrayId(dataset.data.abscissa),
+    ordinate: arrayId(dataset.data.ordinateOriginal),
   }))
 }
 

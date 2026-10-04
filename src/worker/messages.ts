@@ -19,6 +19,7 @@ const runnerMetadataSchema = z.object({
     minDistance: z.number(),
     minHeight: z.number().nullable(),
     mode: z.enum(['maxima', 'minima']),
+    auto: z.boolean().optional(),
   }),
 })
 
@@ -31,6 +32,17 @@ const assignedPeakSchema = z.object({
   confidence: z.enum(['high', 'medium', 'low']),
   alternatives: z.array(z.string()),
 })
+
+export const smoothingSuggestionSchema = z.object({
+  windowLength: z.number(),
+  polyorder: z.number(),
+  noise: z.number(),
+  snr: z.number().nullable(),
+  fwhmPoints: z.number().nullable(),
+  status: z.enum(['ok', 'noise_free', 'too_narrow', 'too_short']),
+})
+
+export type SmoothingSuggestion = z.infer<typeof smoothingSuggestionSchema>
 
 export const workerRequestSchema = z.discriminatedUnion('type', [
   z.object({
@@ -60,17 +72,13 @@ export const workerRequestSchema = z.discriminatedUnion('type', [
     minDistance: z.number(),
     minHeight: z.number().nullable(),
     mode: z.enum(['maxima', 'minima']),
+    auto: z.boolean(),
   }),
   z.object({
-    type: z.literal('peak_heatmap'),
+    type: z.literal('suggest_smoothing'),
     requestId: z.string(),
     spectrumId: z.string(),
-    abscissa: z.array(z.number()),
     ordinate: signalSchema,
-    prominenceValues: z.array(z.number()),
-    distanceValues: z.array(z.number()),
-    minHeight: z.number().nullable(),
-    mode: z.enum(['maxima', 'minima']),
   }),
   z.object({
     type: z.literal('cancel'),
@@ -116,14 +124,14 @@ export const workerResponseSchema = z.discriminatedUnion('type', [
         prominence: z.number(),
       }),
     ),
+    /** Settings detection actually used; differs from the request when auto is on. */
+    settings: z.object({ prominence: z.number(), minDistance: z.number() }),
   }),
   z.object({
-    type: z.literal('peaks_heatmap_result'),
+    type: z.literal('smoothing_suggestion'),
     requestId: z.string(),
     spectrumId: z.string(),
-    prominenceValues: z.array(z.number()),
-    distanceValues: z.array(z.number()),
-    counts: z.array(z.array(z.number())),
+    suggestion: smoothingSuggestionSchema,
   }),
   z.object({
     type: z.literal('error'),

@@ -6,7 +6,7 @@ describe('IR table labeling', () => {
   it('updates automatic labels and keeps a manually edited label and peak ID', () => {
     const existing: Peak[] = [{
       id: 'p1', index: 1, x: 1740, y: 0.8, label: 'my carbonyl',
-      labelEdited: true, source: 'auto', enabled: true, dataOrigin: 'processed',
+      labelEdited: true, source: 'auto', enabled: true,
     }]
     const assigned = mergeAssignedPeaks(existing, [{
       index: 1, x: 1740, y: 1, prominence: 0.8, label: 'Ester · C=O',
@@ -18,7 +18,7 @@ describe('IR table labeling', () => {
   it('keeps detected peaks when the script returns no assignments', () => {
     const detected: Peak[] = [{
       id: 'p1', index: 1, x: 1740, y: 0.8, label: '1740.00',
-      source: 'auto', enabled: true, dataOrigin: 'processed',
+      source: 'auto', enabled: true,
     }]
     expect(shouldApplyAssignedPeaks([], 'ir')).toBe(false)
     expect(shouldApplyAssignedPeaks(undefined, 'ir')).toBe(false)

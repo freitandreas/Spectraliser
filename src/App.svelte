@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte'
   import ImportWizard from './lib/ImportWizard.svelte'
+  import ExperimentMetadataImport from './lib/ExperimentMetadataImport.svelte'
   import StartupWizard from './lib/StartupWizard.svelte'
   import WorkbenchHeader from './lib/workbench/WorkbenchHeader.svelte'
   import SampleExplorer from './lib/workbench/SampleExplorer.svelte'
@@ -11,6 +12,8 @@
   import { downloadReport, type ExportFormat } from './services/export/downloadReport'
   import type { ImportOptions } from './services/import/parsers'
   import { projectStore } from './state/projectStore'
+  import type { MetadataPatch, StylePatch } from './state/datasetActions'
+  import type { SpectrumDataset } from './types/project'
   import {
     hasCompletedStartupWizard,
     loadStartupPreferences,
@@ -20,7 +23,7 @@
   import { computePrecision } from './state/computeSettings'
   import { quantityNotation } from './state/displaySettings'
   import { removeAllDatasets, setAllDatasetsVisible, setTransformEnabled, setTransformParams } from './state/workbenchActions'
-  import { applyGeneralChange, planGeneralChange, type GeneralSettingsContext } from './state/generalSettingsActions'
+  import { applyGeneralChange, generalSettingsError, planGeneralChange, type GeneralSettingsContext } from './state/generalSettingsActions'
   import {
     beginResize,
     resolveResize,
@@ -35,6 +38,8 @@
   } from './lib/workbench/workbenchUtils'
 
   let importOpen = false
+  let metadataImportOpen = false
+  let metadataError = ''
   let importError = ''
   let wizardFiles: File[] = []
   let startupWizardOpen = !hasCompletedStartupWizard()
@@ -48,7 +53,7 @@
   let pendingGuiAction: (() => void) | null = null
 
   let layoutEl: HTMLDivElement | null = null
-  let workspaceMain: any = null
+  let workspaceMain: WorkspaceMain | null = null
   let openSampleTabIds: string[] = []
   let expandedSampleId: string | null = null
   let explorerFocusDatasetId: string | null = null
@@ -82,7 +87,13 @@
     })
     .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
 
-  $: visibleDatasets = $projectStore.datasets.filter((dataset) => dataset.style.visible !== false)
+  // Only a new datasets array changes the plotted set; view-state updates keep the same reference.
+  let visibleSource: SpectrumDataset[] | null = null
+  let visibleDatasets: SpectrumDataset[] = []
+  $: if ($projectStore.datasets !== visibleSource) {
+    visibleSource = $projectStore.datasets
+    visibleDatasets = visibleSource.filter((dataset) => dataset.style.visible !== false)
+  }
   $: activeSampleTabMeta = activeWorkspaceTab === 'script_view' ? null : parseSampleTabId(activeWorkspaceTab)
   $: activeSampleTabDataset = activeSampleTabMeta
     ? ($projectStore.datasets.find((dataset) => dataset.id === activeSampleTabMeta.datasetId) ?? null)
@@ -114,6 +125,11 @@
   $: rightPanelDataset = rightPanelDatasetId
     ? ($projectStore.datasets.find((dataset) => dataset.id === rightPanelDatasetId) ?? null)
     : null
+  $: selectedDatasetId = $projectStore.datasets.find(
+    (dataset) => dataset.id === $projectStore.viewState.selectedSpectrumId,
+  )?.id ?? null
+  $: allDatasetsVisible = $projectStore.datasets.length > 0
+    && $projectStore.datasets.every((dataset) => dataset.style.visible !== false)
 
   async function handleImport(event: CustomEvent<{ files: File[]; options: ImportOptions }>): Promise<void> {
     importError = ''
@@ -132,10 +148,40 @@
     }
   }
 
+  function handleMetadataImport(event: CustomEvent<{
+    table: import('./services/metadata/importMetadata').MetadataTable
+    delimiter: import('./services/metadata/importMetadata').MetadataDelimiter
+    matchField: import('./services/metadata/importMetadata').MetadataMatchField
+    keyColumn: string
+  }>): void {
+    const { table, ...options } = event.detail
+    const result = projectStore.linkExperimentMetadata(table, options)
+    if (result.errors.length) {
+      metadataError = result.errors.join(' ')
+      return
+    }
+    metadataError = ''
+    metadataImportOpen = false
+  }
+
   function openWizardWithFiles(files: File[]): void {
     if (files.length === 0) return
     wizardFiles = files
     importOpen = true
+  }
+
+  function openImportFiles(): void {
+    importError = ''
+    wizardFiles = []
+    importOpen = true
+  }
+
+  function startNewSession(): void {
+    if ($projectStore.datasets.length > 0) {
+      if (!confirm(`Start a new session and remove all ${$projectStore.datasets.length} samples?`)) return
+      removeAllDatasets()
+    }
+    startupWizardOpen = true
   }
 
   function completeStartupWizard(event: CustomEvent<StartupPreferences>): void {
@@ -162,6 +208,11 @@
 
   $: generalContext = { axes: startupPreferences.axes, queueGuiAction, persistAxes, persistLineWidth } satisfies GeneralSettingsContext
 
+  function openMetadataLink(): void {
+    metadataError = ''
+    metadataImportOpen = true
+  }
+
   function updatePlotStyle(plotStyle: StartupPreferences['plotStyle']): void {
     startupPreferences = { ...startupPreferences, plotStyle }
     saveStartupPreferences(startupPreferences)
@@ -185,12 +236,19 @@
     queueGuiAction(() => projectStore.updateStyle(datasetId, { label }))
   }
 
-  function updateDatasetStyle(datasetId: string, patch: Record<string, unknown>): void {
-    queueGuiAction(() => projectStore.updateStyle(datasetId, patch as any))
+  function updateDatasetStyle(datasetId: string, patch: StylePatch): void {
+    queueGuiAction(() => projectStore.updateStyle(datasetId, patch))
   }
 
-  function updateDatasetMetadata(datasetId: string, patch: Record<string, unknown>): void {
-    queueGuiAction(() => projectStore.updateDatasetMetadata(datasetId, patch as any))
+  function updateDatasetMetadata(datasetId: string, patch: MetadataPatch): void {
+    queueGuiAction(() => {
+      try {
+        projectStore.updateDatasetMetadata(datasetId, patch)
+        if (patch.units) generalSettingsError.set('')
+      } catch (error) {
+        generalSettingsError.set(error instanceof Error ? error.message : String(error))
+      }
+    })
   }
 
   function confirmOverwriteAndApply(): void {
@@ -221,14 +279,6 @@
   function confirmExport(): void {
     exportOpen = false
     downloadReport(exportFormat)
-  }
-
-  function startNewSession(): void {
-    if ($projectStore.datasets.length > 0) {
-      if (!confirm(`Start a new session and remove all ${$projectStore.datasets.length} samples?`)) return
-      removeAllDatasets()
-    }
-    startupWizardOpen = true
   }
 
   function clearFileSelection(): void {
@@ -338,30 +388,30 @@
 <div class="workbench">
   <WorkbenchHeader
     {leftPanelOpen}
-    {bottomPanelOpen}
-    {rightPanelOpen}
-    scriptProgress={$projectStore.scriptProgress}
-    onToggleData={() => { leftPanelOpen = !leftPanelOpen }}
-    onToggleScript={() => {
-      bottomPanelOpen = !bottomPanelOpen
-      if (bottomPanelOpen) {
-        activateScriptTab()
-        void tick().then(() => workspaceMain?.requestScriptMeasure())
-      }
+    {allDatasetsVisible}
+    {selectedDatasetId}
+    onToggleAllVisibility={() => setAllDatasetsVisible(queueGuiAction, !allDatasetsVisible)}
+    onImportFiles={openImportFiles}
+    onStartNewSession={startNewSession}
+    onToggleSampleExplorer={() => { leftPanelOpen = !leftPanelOpen }}
+    onShowDataTable={() => {
+      if (selectedDatasetId) openSampleSubTab(selectedDatasetId, 'data')
     }}
-    onAnalyse={() => {
-      const selectedId = $projectStore.viewState.selectedSpectrumId ?? $projectStore.datasets[0]?.id
-      if (selectedId) openSampleSubTab(selectedId, 'data')
+    onShowPeakAssignments={() => {
+      if (selectedDatasetId) openSampleSubTab(selectedDatasetId, 'peaks')
     }}
-    onToggleSettings={() => {
-      rightPanelOpen = !rightPanelOpen
-      if (rightPanelOpen) rightPanelDatasetId = null
+    onShowScript={() => {
+      bottomPanelOpen = true
+      activateScriptTab()
+      void tick().then(() => workspaceMain?.requestScriptMeasure())
+    }}
+    onShowSettings={() => {
+      rightPanelOpen = true
+      rightPanelDatasetId = null
     }}
     onExport={() => { exportOpen = true }}
+    onLinkMetadata={openMetadataLink}
     datasetCount={$projectStore.datasets.length}
-    onStartNewSession={startNewSession}
-    onShowAll={() => setAllDatasetsVisible(queueGuiAction, true)}
-    onHideAll={() => setAllDatasetsVisible(queueGuiAction, false)}
   />
 
   <div
@@ -409,6 +459,7 @@
       onActivateScript={activateScriptTab}
       onCloseTab={closeSampleTab}
       onCloseBottomPanel={() => { bottomPanelOpen = false }}
+      onLinkMetadata={openMetadataLink}
     />
 
     <button
@@ -484,6 +535,14 @@
     wizardFiles = []
   }}
   on:import={handleImport}
+/>
+
+<ExperimentMetadataImport
+  open={metadataImportOpen}
+  datasets={$projectStore.datasets}
+  error={metadataError}
+  on:close={() => { metadataImportOpen = false }}
+  on:import={handleMetadataImport}
 />
 
 <StartupWizard

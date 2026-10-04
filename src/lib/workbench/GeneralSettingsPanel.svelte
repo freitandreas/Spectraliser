@@ -18,7 +18,10 @@
   import PlotModeSettings from '../PlotModeSettings.svelte'
   import ComputePrecisionSettings from '../ComputePrecisionSettings.svelte'
   import PipelineEditor from './PipelineEditor.svelte'
+  import { projectStore } from '../../state/projectStore'
   import SettingBadge from './SettingBadge.svelte'
+  import HelpTip from '../HelpTip.svelte'
+  import { numericCustomFields } from '../../services/metadataFields'
   import type { BadgeInfo } from './settingBadge'
   import { COLOR_PALETTES, PALETTE_KIND_LABELS, paletteGradientCss, type PaletteKind } from '../../services/palettes'
 
@@ -67,16 +70,16 @@
   function selectValue(event: Event): string {
     return (event.target as HTMLSelectElement).value
   }
+  $: customFields = numericCustomFields($projectStore.datasets.map((dataset) => dataset.experimentMetadata))
 </script>
 
 <section class="sample-settings">
   <header class="sample-settings-header">
     <h2>All samples</h2>
+    <HelpTip label="General settings" text="Samples follow these values unless they were given their own. Changes convert or reprocess every following sample." />
   </header>
 
-  <p class="general-settings-hint">
-    {datasetCount} sample{datasetCount === 1 ? '' : 's'} loaded. Samples follow these values unless they were given their own.
-  </p>
+  <p class="general-settings-hint">{datasetCount} sample{datasetCount === 1 ? '' : 's'} loaded.</p>
   {#if deviatingCount > 0}
     <button type="button" class="general-deviation-link" on:click={onShowDifferences}>
       {deviatingCount} sample{deviatingCount === 1 ? ' doesn’t' : 's don’t'} follow all general settings
@@ -87,6 +90,10 @@
 
   {#if activeTab === 'axes'}
     <div class="settings-card">
+      <span class="setting-label-row">
+        <strong class="card-title">Axes</strong>
+        <HelpTip label="Axis conversion" text="Changing quantities or units converts sample data numerically (wavelength ↔ wavenumber, absorbance ↔ transmittance, percent scaling); incompatible quantities are rejected." />
+      </span>
       <label>
         Axis preset
         <select value="" on:change={(event) => { applyPreset(selectValue(event)); (event.target as HTMLSelectElement).value = '' }}>
@@ -134,17 +141,13 @@
           {/each}
         </select>
       </label>
-      <p class="option-description">
-        Changes convert sample data numerically (wavelength ↔ wavenumber, absorbance ↔ transmittance, percent scaling);
-        incompatible quantities are rejected.
-      </p>
     </div>
   {/if}
 
   {#if activeTab === 'appearance'}
     <div class="settings-card">
       <strong class="card-title">Spectrum plot</strong>
-      <PlotModeSettings {plotStyle} onChange={onUpdatePlotStyle} compact />
+      <PlotModeSettings {plotStyle} onChange={onUpdatePlotStyle} customFields={customFields} compact />
       <label>
         Axis label format
         <select
@@ -228,6 +231,12 @@
           if (step) onChange({ kind: 'step', type: step.type, params })
         }}
         badgeFor={(type) => badgeFor(pipelineKey(type))}
+        onAutoSmoothing={async () => {
+          const advice = await projectStore.adviseSmoothing('all')
+          if (advice.params) onChange({ kind: 'step', type: 'smoothing', params: advice.params })
+          else if (advice.disable) onChange({ kind: 'step', type: 'smoothing', enabled: false })
+          return advice.message
+        }}
       />
     </div>
     <div class="settings-card">

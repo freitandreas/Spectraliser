@@ -1,5 +1,4 @@
 import type { ProjectGeneralSettings } from '../services/generalSettings'
-import type { SeriesCoordinate } from '../services/seriesCoordinates'
 
 export type SpectrumType = 'uv-vis' | 'ir' | 'raman'
 
@@ -33,6 +32,9 @@ export interface DataSeries {
   precision: 'float32' | 'float64'
 }
 
+/** Imported experiment fields; blank cells are retained explicitly as null. */
+export type ExperimentMetadata = Record<string, string | null>
+
 export interface Peak {
   id: string
   index: number
@@ -46,7 +48,6 @@ export interface Peak {
   confidence?: 'high' | 'medium' | 'low'
   alternatives?: string[]
   enabled: boolean
-  dataOrigin: 'processed' | 'original'
 }
 
 export interface PeakDetectionOptions {
@@ -54,6 +55,16 @@ export interface PeakDetectionOptions {
   minDistance: number
   minHeight: number | null
   mode: 'maxima' | 'minima'
+  /** Derive prominence and min distance from the noise level and band widths on every detection. */
+  auto?: boolean
+}
+
+export const DEFAULT_PEAK_DETECTION: PeakDetectionOptions = {
+  prominence: 0.01,
+  minDistance: 1,
+  minHeight: null,
+  mode: 'maxima',
+  auto: true,
 }
 
 export interface TransformDefinition {
@@ -80,9 +91,9 @@ export interface SpectrumDataset {
   pipeline: TransformDefinition[]
   style: SpectrumStyle
   peaks: Peak[]
+  /** Fields such as Time or Concentration; values carry their unit (`30 s`, `0.5 mM`). */
+  experimentMetadata?: ExperimentMetadata
   peakDetection?: PeakDetectionOptions
-  /** User-entered series coordinate (e.g. measurement time); overrides values parsed from the label. */
-  seriesCoordinate?: SeriesCoordinate | null
 }
 
 export interface ViewState {
@@ -107,19 +118,10 @@ export interface AppState {
   generatedScript: string
   userScriptOverride: string | null
   pythonFileOverrides?: Record<string, string>
-  workerBusy: boolean
-  workerLastError: string | null
-  scriptOutput: string[]
-  scriptProgress: {
-    active: boolean
-    completed: number
-    total: number
-    message: string
-  }
   autosaveEnabled: boolean
 }
 
-export const APP_SCHEMA_VERSION = '1.1.0'
+export const APP_SCHEMA_VERSION = '1.5.0'
 
 export const DEFAULT_STYLE: SpectrumStyle = {
   lineColor: '#4fc1ff',

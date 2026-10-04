@@ -35,13 +35,13 @@ class SelectiveRunTests(unittest.TestCase):
         samples = [sample('a', [INVERT]), sample('b', [INVERT])]
         results = run_samples(['b'], samples, process_spectrum, assign_ir_peaks)
         self.assertEqual([result['id'] for result in results], ['b'])
-        self.assertEqual(results[0]['ordinate_modified'][:3], [-0.0, -1.0, -2.0])
+        self.assertEqual(results[0]['ordinate_modified'][:3].tolist(), [-0.0, -1.0, -2.0])
 
     def test_crop_keeps_length_with_nan_outside_window_and_does_not_touch_inputs(self):
         source = sample('a', [CROP, INVERT])
         before = list(source['ordinate'])
         result = run_samples(['a'], [source], process_spectrum, assign_ir_peaks)[0]
-        values = result['ordinate_modified']
+        values = result['ordinate_modified'].tolist()
         self.assertEqual(len(values), 10)
         self.assertTrue(all(math.isnan(v) for v in values[:3] + values[7:]))
         self.assertEqual(values[3:7], [-3.0, -4.0, -5.0, -6.0])
@@ -67,7 +67,7 @@ class SelectiveRunTests(unittest.TestCase):
 
         result = run_samples(['a'], [sample('a', [])], custom, assign_ir_peaks)[0]
         self.assertTrue(math.isnan(result['ordinate_modified'][4]))
-        self.assertEqual(result['ordinate_modified'][5:], [10.0, 12.0, 14.0, 16.0, 18.0])
+        self.assertEqual(result['ordinate_modified'][5:].tolist(), [10.0, 12.0, 14.0, 16.0, 18.0])
 
     def test_rejects_rows_that_cannot_be_matched(self):
         def custom(df, meta):

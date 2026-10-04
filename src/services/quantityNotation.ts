@@ -10,6 +10,7 @@ export interface QuantitySymbol {
   base: string
   /** Upright descriptive subscript, e.g. "norm". */
   sub?: string
+  /** TeX of the base symbol; descriptive subscripts are appended by quantityTex. */
   tex: string
 }
 
@@ -21,13 +22,19 @@ export const QUANTITY_SYMBOLS: Record<string, QuantitySymbol> = {
   Frequency: { base: 'ν', tex: '\\nu' },
   Energy: { base: 'E', tex: 'E' },
   Time: { base: 't', tex: 't' },
+  Concentration: { base: 'c', tex: 'c' },
   Absorbance: { base: 'A', tex: 'A' },
   Transmittance: { base: 'T', tex: 'T' },
   Reflectance: { base: 'R', tex: 'R' },
   Intensity: { base: 'I', tex: 'I' },
   Counts: { base: 'N', tex: 'N' },
-  'Normalised intensity': { base: 'I', sub: 'norm', tex: 'I_{\\mathrm{norm}}' },
+  'Normalised intensity': { base: 'I', sub: 'norm', tex: 'I' },
   'Series number': { base: 'n', tex: 'n' },
+}
+
+function subscripts(symbol: QuantitySymbol | null, extra?: string): string[] {
+  const parts = [symbol?.sub, ...(extra?.split(',') ?? [])].map((part) => part?.trim())
+  return [...new Set(parts.filter((part): part is string => Boolean(part)))]
 }
 
 export function quantitySymbol(quantity: string, notation: QuantityNotation): QuantitySymbol | null {
@@ -47,13 +54,26 @@ export function quantityHtml(quantity: string, notation: QuantityNotation, subsc
   if (!symbol) {
     return escapeHtml(quantity) + (subscript ? `<sub>${escapeHtml(subscript)}</sub>` : '')
   }
-  const subs = [symbol.sub, subscript].filter(Boolean).map((part) => escapeHtml(part!)).join(',')
+  const subs = subscripts(symbol, subscript).map(escapeHtml).join(',')
   return `<i>${escapeHtml(symbol.base)}</i>${subs ? `<sub>${subs}</sub>` : ''}`
 }
 
 /** Unformatted text for contexts without markup (WebGL scene titles, CSV headers, examples). */
-export function quantityPlain(quantity: string, notation: QuantityNotation): string {
+export function quantityPlain(quantity: string, notation: QuantityNotation, subscript?: string): string {
   const symbol = quantitySymbol(quantity, notation)
-  if (!symbol) return quantity
-  return symbol.sub ? `${symbol.base}_${symbol.sub}` : symbol.base
+  if (!symbol) return subscript ? `${quantity}_${subscript}` : quantity
+  const subs = subscripts(symbol, subscript).join(',')
+  return subs ? `${symbol.base}_${subs}` : symbol.base
+}
+
+function texText(value: string): string {
+  return value.replace(/[\\{}$%&#_^~]/g, (char) => (char === '\\' ? '\\backslash ' : `\\${char}`))
+}
+
+/** TeX for MathJax axis titles: italic symbols or upright names, upright descriptive subscripts. */
+export function quantityTex(quantity: string, notation: QuantityNotation, subscript?: string): string {
+  const symbol = quantitySymbol(quantity, notation)
+  const subs = subscripts(symbol, subscript).map(texText).join(',')
+  const base = symbol ? symbol.tex : `\\text{${texText(quantity)}}`
+  return subs ? `${base}_{\\mathrm{${subs}}}` : base
 }

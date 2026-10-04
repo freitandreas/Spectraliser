@@ -1,3 +1,4 @@
+import { finiteRange } from '../../services/numeric'
 import type { SpectrumDataset } from '../../types/project'
 import type { PlotMode } from '../../services/startupPreferences'
 import { AxisRangeTween } from './zoomTween'
@@ -20,15 +21,7 @@ export interface PeakZoom {
 }
 
 function dataXRange(datasets: SpectrumDataset[]): [number, number] | null {
-  let low = Number.POSITIVE_INFINITY
-  let high = Number.NEGATIVE_INFINITY
-  for (const dataset of datasets) {
-    for (const value of dataset.data.abscissa) {
-      if (value < low) low = value
-      if (value > high) high = value
-    }
-  }
-  return low <= high ? [low, high] : null
+  return finiteRange(...datasets.map((dataset) => dataset.data.abscissa))
 }
 
 /** Zooms the abscissa onto a peak and restores the previous view afterwards (2D modes only). */

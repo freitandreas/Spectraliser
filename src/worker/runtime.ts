@@ -1,11 +1,10 @@
 import type { WorkerResponse } from './messages'
 import { workerRequestSchema } from './messages'
-import { logInfo, logWarn, logError, state, ensurePyodideReady } from './runtimeCore'
+import { logWarn, logError, state, ensurePyodideReady } from './runtimeCore'
 import { executeBatch } from './scriptRuntime'
-import { detectPeaks, computePeakHeatmap } from './peakRuntime'
+import { detectPeaks, suggestSmoothing } from './peakRuntime'
 
 export async function handleWorkerRequest(requestRaw: unknown): Promise<WorkerResponse> {
-  logInfo('Incoming worker message raw:', requestRaw)
 
   const parsed = workerRequestSchema.safeParse(requestRaw)
   if (!parsed.success) {
@@ -18,12 +17,10 @@ export async function handleWorkerRequest(requestRaw: unknown): Promise<WorkerRe
   }
 
   const request = parsed.data
-  logInfo(`Processing request of type '${request.type}' (ID: ${request.requestId})`)
 
   if (request.type === 'init') {
     try {
       const pyodide = await ensurePyodideReady()
-      logInfo(`Worker ready signal sent for request ID: ${request.requestId}`)
       return {
         type: 'ready',
         requestId: request.requestId,
@@ -58,7 +55,7 @@ export async function handleWorkerRequest(requestRaw: unknown): Promise<WorkerRe
       return await detectPeaks(request)
     }
 
-    return await computePeakHeatmap(request)
+    return await suggestSmoothing(request)
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown worker error'
     logError(`Execution failed for request ${request.requestId}:`, message)

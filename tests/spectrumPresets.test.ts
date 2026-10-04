@@ -5,7 +5,7 @@ import {
   canonicalUnit,
   formatUnit,
   isPercentUnit,
-  percentScaleFactor,
+  ordinateUnitFactor,
 } from '../src/services/spectrumPresets'
 import { canConvertAbscissa, convertAbscissa } from '../src/services/import/unitConversion'
 
@@ -35,9 +35,16 @@ describe('percent ordinates', () => {
   })
 
   it('scales data by 100 when switching to percent and back', () => {
-    expect(percentScaleFactor('', '%')).toBe(100)
-    expect(percentScaleFactor('%', '')).toBe(0.01)
-    expect(percentScaleFactor('a.u.', '')).toBeNull()
+    expect(ordinateUnitFactor('', '%')).toBe(100)
+    expect(ordinateUnitFactor('%', '')).toBe(0.01)
+    expect(ordinateUnitFactor('%', '%')).toBeNull()
+    expect(ordinateUnitFactor('a.u.', '')).toBeNull()
+    expect(ordinateUnitFactor('counts', 'a.u.')).toBeNull()
+  })
+
+  it('rejects percent conversions of units without an absolute scale', () => {
+    expect(() => ordinateUnitFactor('a.u.', '%')).toThrow(/no absolute scale/)
+    expect(() => ordinateUnitFactor('%', 'counts')).toThrow(/no absolute scale/)
   })
 })
 

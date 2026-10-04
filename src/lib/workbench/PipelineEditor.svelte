@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { TransformDefinition } from '../../types/project'
   import SettingBadge from './SettingBadge.svelte'
+  import HelpTip from '../HelpTip.svelte'
   import type { BadgeInfo } from './settingBadge'
   import {
     NORMALIZATION_MODES,
@@ -15,6 +16,23 @@
   export let onParams: (transformId: string, params: Params) => void
   /** Optional per-step marker, e.g. "differs from general" or "3 samples differ". */
   export let badgeFor: (type: TransformDefinition['type']) => BadgeInfo | null = () => null
+  /** Derives Savitzky–Golay parameters from the data, applies them, and returns the rationale. */
+  export let onAutoSmoothing: ((transformId: string) => Promise<string>) | null = null
+
+  let autoBusy = false
+  let autoMessage = ''
+
+  async function runAutoSmoothing(transformId: string): Promise<void> {
+    if (!onAutoSmoothing || autoBusy) return
+    autoBusy = true
+    try {
+      autoMessage = await onAutoSmoothing(transformId)
+    } catch (error) {
+      autoMessage = error instanceof Error ? error.message : 'Automatic smoothing failed.'
+    } finally {
+      autoBusy = false
+    }
+  }
 
   const STEP_META: Record<string, { title: string; summary: string }> = {
     crop: { title: 'Crop', summary: 'Restrict the spectrum to an abscissa window.' },
@@ -30,7 +48,7 @@
   }
 </script>
 
-<p class="pipeline-intro">Steps run top to bottom on the original data.</p>
+<div class="pipeline-intro"><strong class="card-title">Processing steps</strong><HelpTip label="Processing steps" text="Steps run top to bottom on the original data." /></div>
 <ol class="pipeline-list">
   {#each pipeline as transform, stepIndex (transform.id)}
     <li class="pipeline-step" class:active={transform.enabled}>
@@ -117,13 +135,24 @@
                     onParams(transform.id, { polyorder: Number((event.target as HTMLInputElement).value) })}
                 />
               </label>
+              {#if onAutoSmoothing}
+                <div class="pipeline-auto">
+                  <button
+                    type="button"
+                    class="ghost"
+                    disabled={autoBusy}
+                    title="Estimate the noise from second differences and choose the widest window that keeps the narrowest bands within ~2 % of their height"
+                    on:click={() => void runAutoSmoothing(transform.id)}
+                  >{autoBusy ? 'Estimating…' : 'Auto'}</button>
+                </div>
+              {/if}
             </div>
           {/if}
 
           {#if transform.type === 'normalization'}
             <div class="pipeline-params single">
               <label>
-                <span>Mode</span>
+                <span class="label-line">Mode <HelpTip label="Normalisation mode" text={describeOption(NORMALIZATION_MODES, String(transform.params.mode ?? 'minmax'))} /></span>
                 <select
                   value={String(transform.params.mode ?? 'minmax')}
                   on:change={(event) =>
@@ -134,16 +163,13 @@
                   {/each}
                 </select>
               </label>
-              <p class="option-description">
-                {describeOption(NORMALIZATION_MODES, String(transform.params.mode ?? 'minmax'))}
-              </p>
             </div>
           {/if}
 
           {#if transform.type === 'peak_localisation'}
             <div class="pipeline-params">
               <label>
-                <span>Profile</span>
+                <span class="label-line">Profile <HelpTip label="Peak profile" text={describeOption(PEAK_PROFILE_MODELS, String(transform.params.model ?? 'gaussian'))} /></span>
                 <select
                   value={String(transform.params.model ?? 'gaussian')}
                   on:change={(event) =>
@@ -165,13 +191,13 @@
                     onParams(transform.id, { prominence: Number((event.target as HTMLInputElement).value) })}
                 />
               </label>
-              <p class="option-description">
-                {describeOption(PEAK_PROFILE_MODELS, String(transform.params.model ?? 'gaussian'))}
-              </p>
             </div>
           {/if}
 
         </div>
+      {/if}
+      {#if transform.type === 'smoothing' && autoMessage}
+        <p class="option-description pipeline-auto-message">{autoMessage}</p>
       {/if}
     </li>
   {/each}

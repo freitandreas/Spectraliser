@@ -24,7 +24,6 @@ describe('physical axis metadata updates', () => {
       label: 'peak',
       source: 'manual',
       enabled: true,
-      dataOrigin: 'original',
     }]
     const previousState = get(appState)
     appState.set({ ...previousState, datasets: [dataset], projectSpectrumType: 'uv-vis' })

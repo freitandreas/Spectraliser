@@ -1,3 +1,4 @@
+import { finiteRange } from '../numeric'
 import * as XLSX from 'xlsx'
 import type { SpectrumType } from '../../types/project'
 
@@ -72,6 +73,21 @@ function inferHeaderUnit(raw: string): string | undefined {
   return token
 }
 
+/**
+ * Ordinate unit stated in a column header, or undefined when none is recognisable.
+ * Series headers often carry a time or sample name ("10 s", "Sample m-xylene"), so
+ * only genuine ordinate units are accepted here.
+ */
+export function inferOrdinateUnit(header: string): string | undefined {
+  // Unit positions only: "(%)", "[%]", "/ %", "in %", "%T", "T%"; not "50% EtOH".
+  if (/(?:^|[\s([/])%\s*(?:[)\]]|$)|%T\b|\bT\s?%/i.test(header)) return '%'
+  if (/\ba\.\s?u\.?|[([]\s*a\.?\s?u\.?\s*[)\]]|\barb(?:itrary|\.)?\s*units?\b/i.test(header)) return 'a.u.'
+  if (/\bcounts?\b|\bcps\b/i.test(header)) return 'counts'
+  const bracketed = header.match(/[([]\s*([^)\]]*?)\s*[)\]]\s*$/)?.[1]
+  if (bracketed !== undefined && ['', '-', '1'].includes(bracketed)) return ''
+  return undefined
+}
+
 function inferXQuantity(header: string, unit?: string): string | undefined {
   const text = header.toLowerCase()
   if (/raman/.test(text)) return 'Raman shift'
@@ -99,10 +115,9 @@ function inferSpectrumType(xHeader: string, xUnit?: string, values?: number[]): 
   if (/raman/.test(text)) return 'raman'
   if (/wavenumber|wave\s*number/.test(text) || /cm/i.test(xUnit ?? '')) return 'ir'
   if (/wavelength|absorbance|uv[\s-]?vis/.test(text)) return 'uv-vis'
-  const finite = (values ?? []).filter(Number.isFinite)
-  if (finite.length >= 2) {
-    const min = Math.min(...finite)
-    const max = Math.max(...finite)
+  const range = finiteRange(values ?? [])
+  if (range && range[0] < range[1]) {
+    const [min, max] = range
     if (min >= 350 && max <= 5000 && max - min >= 1000) return 'ir'
     if (min >= 100 && max <= 1200) return 'uv-vis'
   }
@@ -173,7 +188,7 @@ function buildSeriesFromRows(
     const xHeader = String(headerRow[options.xColumn] ?? '').trim()
     const yHeader = String(headerRow[yColumn] ?? '').trim()
     const inferredXUnit = inferHeaderUnit(xHeader)
-    const inferredYUnit = inferHeaderUnit(yHeader)
+    const inferredYUnit = inferOrdinateUnit(yHeader)
 
     const headerLabel = yHeader.length > 0 ? yHeader : `Series ${yColumn + 1}`
     const label = headerLabel.length > 0 ? headerLabel : `Series ${yColumn + 1}`

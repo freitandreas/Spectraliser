@@ -1,7 +1,7 @@
-import { get } from 'svelte/store'
-import { appState } from './projectContext'
 import { projectStore } from './projectStore'
+import { removeAllDatasets as removeAll, updateAllStyles } from './datasetActions'
 import { resetScriptExecutionCache } from './scriptActions'
+import { resetRuntime } from './runtimeState'
 
 /** Wraps an action in the desync confirmation flow owned by the shell. */
 export type QueueGuiAction = (action: () => void) => void
@@ -20,14 +20,11 @@ export function setTransformParams(
 }
 
 export function removeAllDatasets(): void {
-  const datasets = get(appState).datasets
-  datasets.forEach((dataset) => projectStore.removeDataset(dataset.id))
+  removeAll()
   resetScriptExecutionCache()
+  resetRuntime()
 }
 
 export function setAllDatasetsVisible(queue: QueueGuiAction, visible: boolean): void {
-  const datasets = get(appState).datasets
-  queue(() => {
-    datasets.forEach((dataset) => projectStore.updateStyle(dataset.id, { visible }))
-  })
+  queue(() => updateAllStyles({ visible }))
 }

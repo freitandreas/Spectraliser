@@ -1,4 +1,6 @@
 <script lang="ts">
+  import type { SpectrumDataset } from '../../types/project'
+  import type { MetadataPatch, StylePatch } from '../../state/datasetActions'
   import { tick } from 'svelte'
   import {
     ABSCISSA_QUANTITIES,
@@ -9,16 +11,16 @@
     formatUnit,
   } from '../../services/spectrumPresets'
   import PipelineEditor from './PipelineEditor.svelte'
+  import { projectStore } from '../../state/projectStore'
   import SettingBadge from './SettingBadge.svelte'
   import type { BadgeInfo } from './settingBadge'
   import { pipelineKey, type SettingKey } from '../../services/generalSettings'
-  import SeriesCoordinateEditor from './SeriesCoordinateEditor.svelte'
 
-  export let dataset: any
+  export let dataset: SpectrumDataset
   export let activeTab: 'general' | 'style' | 'pipeline'
   export let onRename: (datasetId: string, label: string) => void
-  export let onUpdateStyle: (datasetId: string, patch: Record<string, unknown>) => void
-  export let onUpdateMetadata: (datasetId: string, patch: Record<string, unknown>) => void
+  export let onUpdateStyle: (datasetId: string, patch: StylePatch) => void
+  export let onUpdateMetadata: (datasetId: string, patch: MetadataPatch) => void
   export let onRerunPipeline: (datasetId: string) => void
   export let onTransformEnabled: (datasetId: string, transformId: string, enabled: boolean) => void
   export let onTransformParam: (datasetId: string, transformId: string, params: Record<string, number | string | boolean>) => void
@@ -247,11 +249,6 @@
           />
         {/if}
       </label>
-      <SeriesCoordinateEditor
-        label={dataset.style.label}
-        coordinate={dataset.seriesCoordinate}
-        onChange={(seriesCoordinate) => onUpdateMetadata(dataset.id, { seriesCoordinate })}
-      />
     </div>
   {/if}
 
@@ -307,6 +304,12 @@
         onEnabled={(transformId, enabled) => onTransformEnabled(dataset.id, transformId, enabled)}
         onParams={(transformId, params) => onTransformParam(dataset.id, transformId, params)}
         badgeFor={(type) => badgeFor(pipelineKey(type))}
+        onAutoSmoothing={async (transformId) => {
+          const advice = await projectStore.adviseSmoothing([dataset.id])
+          if (advice.params) onTransformParam(dataset.id, transformId, advice.params)
+          else if (advice.disable) onTransformEnabled(dataset.id, transformId, false)
+          return advice.message
+        }}
       />
     </div>
   {/if}

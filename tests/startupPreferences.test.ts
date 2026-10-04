@@ -20,6 +20,7 @@ describe('startup preferences', () => {
     expect(DEFAULT_STARTUP_PREFERENCES.plotStyle).toMatchObject({
       plotMode: 'overlay',
       axisLabelFormat: 'slash',
+      seriesField: 'time',
       seriesUnit: 's',
       seriesInterpolation: { enabled: false, steps: 1 },
     })
@@ -37,7 +38,8 @@ describe('startup preferences', () => {
         lineWidth: 4,
         plotMode: 'surface3d' as const,
         axisLabelFormat: 'fraction' as const,
-        seriesUnit: 'min' as const,
+        seriesField: 'concentration',
+        seriesUnit: 'µM',
         seriesInterpolation: { enabled: true, steps: 3 },
       },
     }
@@ -101,6 +103,18 @@ describe('startup preferences', () => {
 
     expect(normalized.plotStyle.seriesInterpolation).toEqual({ enabled: true, steps: MAX_INTERPOLATION_STEPS })
     expect(normalized.plotStyle).toMatchObject({ seriesMode: 'lines', plotMode: 'overlay', axisLabelFormat: 'slash', seriesUnit: 's' })
+  })
+
+  it('defaults legacy preferences to a time axis and validates the unit per field', () => {
+    const { seriesField: _field, ...legacyStyle } = DEFAULT_STARTUP_PREFERENCES.plotStyle
+    expect(normalizeStartupPreferences({ ...DEFAULT_STARTUP_PREFERENCES, plotStyle: { ...legacyStyle, seriesUnit: 'min' } as never }).plotStyle)
+      .toMatchObject({ seriesField: 'time', seriesUnit: 'min' })
+    const style = (seriesField: string, seriesUnit: string) => normalizeStartupPreferences({
+      ...DEFAULT_STARTUP_PREFERENCES,
+      plotStyle: { ...DEFAULT_STARTUP_PREFERENCES.plotStyle, seriesField, seriesUnit },
+    }).plotStyle
+    expect(style('concentration', 's')).toMatchObject({ seriesField: 'concentration', seriesUnit: 'mM' })
+    expect(style('Temperature', '°C')).toMatchObject({ seriesField: 'Temperature', seriesUnit: '' })
   })
 
   it('normalizes persisted axis quantity/unit pairs to supported physical choices', () => {

@@ -1,3 +1,4 @@
+import { finiteRange } from '../services/numeric'
 import { get, writable } from 'svelte/store'
 import type { SpectrumDataset, TransformDefinition } from '../types/project'
 import {
@@ -16,7 +17,7 @@ import { canConvertAbscissa, convertAbscissa } from '../services/import/unitConv
 import { paletteColor, type PaletteSlot } from '../services/palettes'
 import { isAbsorbanceTransmittancePair } from '../services/ordinateConversion'
 import { canonicalUnit, formatUnit } from '../services/spectrumPresets'
-import { appState, commitDatasets } from './projectContext'
+import { appState, commitDatasets, mapDataset } from './projectContext'
 import { updateDatasetMetadata } from './datasetActions'
 
 export type GeneralChange =
@@ -66,18 +67,6 @@ export function generalSnapshot(general: ProjectGeneralSettings, axes: GeneralAx
   return { ...general, axes: { ...axes } }
 }
 
-function abscissaUnion(datasets: SpectrumDataset[]): [number, number] | null {
-  let low = Infinity
-  let high = -Infinity
-  for (const dataset of datasets) {
-    for (const value of dataset.data.abscissa) {
-      if (value < low) low = value
-      if (value > high) high = value
-    }
-  }
-  return Number.isFinite(low) && Number.isFinite(high) ? [low, high] : null
-}
-
 function patchedStep(
   step: TransformDefinition,
   change: Extract<GeneralChange, { kind: 'step' }>,
@@ -86,7 +75,7 @@ function patchedStep(
   const params = { ...step.params, ...(change.params ?? {}) }
   // A general crop window starts from the measured range of all samples instead of an empty window.
   if (step.type === 'crop' && change.enabled && params.x_min === params.x_max) {
-    const range = abscissaUnion(datasets)
+    const range = finiteRange(...datasets.map((dataset) => dataset.data.abscissa))
     if (range) [params.x_min, params.x_max] = range
   }
   return { ...step, enabled: change.enabled ?? step.enabled, params }
@@ -301,9 +290,7 @@ export function resetSampleSetting(datasetId: string, key: SettingKey, context: 
       }
       return
     }
-    appState.update((current) => commitDatasets(
-      current,
-      current.datasets.map((dataset, position) => (dataset.id === datasetId ? withGeneralValue(dataset, { index: position, count: current.datasets.length }, general, key) : dataset)),
-    ))
+    appState.update((current) => commitDatasets(current, mapDataset(current.datasets, datasetId, (dataset) =>
+      withGeneralValue(dataset, { index: current.datasets.indexOf(dataset), count: current.datasets.length }, general, key))))
   })
 }

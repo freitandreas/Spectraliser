@@ -1,4 +1,5 @@
 <script lang="ts">
+  import HelpTip from '../HelpTip.svelte'
   import type { SpectrumDataset } from '../../types/project'
   import {
     generalSettingText,
@@ -38,11 +39,10 @@
 {#if open}
   <div class="confirm-backdrop" role="presentation" on:click|self={onClose}>
     <div class="confirm-modal differences-modal" role="dialog" aria-modal="true" aria-label="Samples that differ from general settings">
-      <h3>Differences from general settings</h3>
+      <h3>Differences from general settings <HelpTip label="Differences" text="Highlighted cells use a sample-specific value. Use ↺ to make that sample follow the general setting again." /></h3>
       {#if columns.length === 0}
         <p>Every sample follows the general settings.</p>
       {:else}
-        <p>Highlighted cells use a sample-specific value. Use ↺ to make that sample follow the general setting again.</p>
         <div class="differences-scroll">
           <table class="differences-table">
             <thead>

@@ -30,8 +30,6 @@ function cancelled(requestId: string): boolean {
 }
 
 export async function executeBatch(request: BatchRequest): Promise<WorkerResponse> {
-  const startTime = performance.now()
-  logInfo(`Executing generated runner for ${request.samples.length} sample(s) (request ${request.requestId})`)
   if (cancelled(request.requestId)) return { type: 'cancelled', requestId: request.requestId }
 
   const pyodide = await ensurePyodideReady()
@@ -41,8 +39,9 @@ export async function executeBatch(request: BatchRequest): Promise<WorkerRespons
   const samples = request.samples.map((sample) => {
     const ordinate = maybeUpgradePrecision(toFloatArray(sample.ordinate, request.preferFloat32))
     precisions.set(sample.id, ordinate.precision)
-    const abscissa = ordinate.precision === 'float64' ? Float64Array.from(sample.abscissa) : toFloatArray(sample.abscissa, true)
-    return { id: sample.id, abscissa: Array.from(abscissa), ordinate: Array.from(ordinate.values), metadata: sample.metadata }
+    // Typed arrays reach Python as buffers (memoryview); the runner reads them with np.asarray.
+    const abscissa = toFloatArray(sample.abscissa, ordinate.precision === 'float32')
+    return { id: sample.id, abscissa, ordinate: ordinate.values, metadata: sample.metadata }
   })
 
   const globals = pyodide.toPy({ runner_samples: samples, changed_modules: changedModules })
@@ -78,7 +77,6 @@ export async function executeBatch(request: BatchRequest): Promise<WorkerRespons
         precision: precisions.get(id) ?? (request.preferFloat32 ? 'float32' : 'float64'),
       }
     })
-    logInfo(`Runner request ${request.requestId} finished in ${(performance.now() - startTime).toFixed(2)}ms.`)
     return { type: 'batch_result', requestId: request.requestId, results }
   } catch (error) {
     logError(`Runner request ${request.requestId} failed:`, error)

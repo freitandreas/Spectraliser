@@ -1,36 +1,26 @@
 import { getSpectrumStyleDefaults, type AppState, type SpectrumDataset } from '../types/project'
-import { appState, scheduleAutosave, regenerateScript, commitDatasets, createDatasetFromParsed, resolveProjectSpectrumType, resolveUniqueLabels, logScriptDebug } from './projectContext'
+import { appState, updateProject, commitDatasets, commitGuiEdit, mapDataset, createDatasetFromParsed, resolveProjectSpectrumType, resolveUniqueLabels } from './projectContext'
 import type { ParsedSpectrum } from '../services/import/parsers'
 import { canConvertAbscissa, convertAbscissa } from '../services/import/unitConversion'
 import { axisDefaultsFor } from '../services/spectrumPresets'
 import { convertOrdinates, ordinateConversion } from '../services/ordinateConversion'
 import { DEFAULT_PALETTE_ID } from '../services/palettes'
 import { adoptGeneralSettings, deriveGeneralSettings, respreadPaletteColors } from '../services/generalSettings'
-import { transitionSyncState } from '../services/script/syncStateMachine'
+import { validateAndLinkMetadata, type MetadataImportOptions, type MetadataImportResult, type MetadataTable } from '../services/metadata/importMetadata'
 
-export function updateDatasetMetadata(
-  datasetId: string,
-  partial: {
-    name?: string
-    sourcePath?: string
-    spectrumType?: SpectrumDataset['spectrumType']
-    units?: Partial<SpectrumDataset['units']>
-    seriesCoordinate?: SpectrumDataset['seriesCoordinate']
-  },
-): void {
+export interface MetadataPatch {
+  name?: string
+  sourcePath?: string
+  spectrumType?: SpectrumDataset['spectrumType']
+  units?: Partial<SpectrumDataset['units']>
+  experimentMetadata?: SpectrumDataset['experimentMetadata']
+}
+
+export type StylePatch = Partial<SpectrumDataset['style']>
+
+export function updateDatasetMetadata(datasetId: string, partial: MetadataPatch): void {
   appState.update((state) => {
-    logScriptDebug('metadata_update', {
-      datasetId,
-      partial,
-      syncMode: state.syncMode,
-      scriptSyncEnabled: state.scriptSyncEnabled,
-    })
-
-    const datasets = state.datasets.map((dataset) => {
-      if (dataset.id !== datasetId) {
-        return dataset
-      }
-
+    const datasets = mapDataset(state.datasets, datasetId, (dataset) => {
       const nextSpectrumType = partial.spectrumType ?? dataset.spectrumType
       const nextStyle = nextSpectrumType === 'ir'
         ? { ...dataset.style, ...getSpectrumStyleDefaults(nextSpectrumType, dataset.style), abscissaInverted: true }
@@ -106,90 +96,35 @@ export function updateDatasetMetadata(
         peaks,
         pipeline,
         style: nextStyle,
-        seriesCoordinate: partial.seriesCoordinate !== undefined ? partial.seriesCoordinate : dataset.seriesCoordinate,
+        experimentMetadata: partial.experimentMetadata ?? dataset.experimentMetadata,
       }
     })
 
-    if (partial.spectrumType) {
-      const policy = resolveProjectSpectrumType([], datasets)
-      if (policy.error) {
-        return state
-      }
-    }
-
-    const syncResult = transitionSyncState(
-      { mode: state.syncMode, scriptSyncEnabled: state.scriptSyncEnabled },
-      { type: 'GUI_EDIT' },
-    )
-
-    const generatedScript = syncResult.scriptSyncEnabled
-      ? regenerateScript(datasets)
-      : state.generatedScript
-
-    const nextState = {
-      ...state,
-      datasets,
-      generatedScript,
-      updatedAt: new Date().toISOString(),
-      syncMode: syncResult.mode,
-      scriptSyncEnabled: syncResult.scriptSyncEnabled,
-    }
-
-    scheduleAutosave(nextState)
-    return nextState
+    if (partial.spectrumType && resolveProjectSpectrumType([], datasets).error) return state
+    return commitGuiEdit(state, datasets)
   })
 }
 
-export function convertDatasetAbscissa(datasetId: string, targetUnit: string): void {
-  updateDatasetMetadata(datasetId, { units: { x: targetUnit } })
+export function updateStyle(datasetId: string, partial: StylePatch): void {
+  appState.update((state) => commitGuiEdit(
+    state,
+    mapDataset(state.datasets, datasetId, (dataset) => ({ ...dataset, style: { ...dataset.style, ...partial } })),
+  ))
 }
 
-export function updateStyle(datasetId: string, partial: Partial<SpectrumDataset['style']>): void {
+/** One update (and one script regeneration) for a style change on every sample. */
+export function updateAllStyles(partial: StylePatch): void {
+  appState.update((state) => commitGuiEdit(
+    state,
+    state.datasets.map((dataset) => ({ ...dataset, style: { ...dataset.style, ...partial } })),
+  ))
+}
+
+export function removeAllDatasets(): void {
   appState.update((state) => {
-    const datasets = state.datasets.map((dataset) => {
-      if (dataset.id !== datasetId) {
-        return dataset
-      }
-
-      return {
-        ...dataset,
-        style: {
-          ...dataset.style,
-          ...partial,
-        },
-      }
-    })
-
-    const syncResult = transitionSyncState(
-      { mode: state.syncMode, scriptSyncEnabled: state.scriptSyncEnabled },
-      { type: 'GUI_EDIT' },
-    )
-
-    const generatedScript = syncResult.scriptSyncEnabled
-      ? regenerateScript(datasets)
-      : state.generatedScript
-
-    const nextState = {
-      ...state,
-      datasets,
-      generatedScript,
-      updatedAt: new Date().toISOString(),
-      syncMode: syncResult.mode,
-      scriptSyncEnabled: syncResult.scriptSyncEnabled,
-    }
-
-    scheduleAutosave(nextState)
-    return nextState
+    const next = commitDatasets(state, [])
+    return { ...next, viewState: { ...next.viewState, selectedSpectrumId: null, activeTab: 'script_view' } }
   })
-}
-
-export function importDataset(input: { name: string; parsed: ParsedSpectrum; sourcePath?: string }): void {
-  importDatasets([
-    {
-      name: input.name,
-      parsed: input.parsed,
-    },
-  ])
 }
 
 export function importDatasets(inputs: Array<{ name: string; parsed: ParsedSpectrum; label?: string; sourcePath?: string }>): string | null {
@@ -289,4 +224,17 @@ export function removeDataset(datasetId: string): void {
       },
     }
   })
+}
+
+/** Links a validated metadata table without rerunning or changing the scientific pipeline. */
+export function linkExperimentMetadata(
+  table: MetadataTable,
+  options: MetadataImportOptions,
+): MetadataImportResult {
+  let result!: MetadataImportResult
+  updateProject((state) => {
+    result = validateAndLinkMetadata(state.datasets, table, options)
+    return result.errors.length ? state : { ...state, datasets: result.datasets }
+  })
+  return result
 }

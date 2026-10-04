@@ -1,26 +1,37 @@
 <script lang="ts">
+  import { startSideColumnResize } from './columnResize'
+  import type { SpectrumDataset } from '../../types/project'
   import QuantityLabel from '../QuantityLabel.svelte'
-  import PeakHeatmap from '../PeakHeatmap.svelte'
+  import HelpTip from '../HelpTip.svelte'
+  import { peakShape, type PeakShape } from '../../services/peakShape'
   import { projectStore } from '../../state/projectStore'
   import { peakSingleSeriesView } from '../../state/displaySettings'
 
-  export let dataset: any
+  export let dataset: SpectrumDataset
   export let peakHoverSelection: { datasetId: string; peakId: string } | null
   export let onPeakHover: (datasetId: string, peakId: string | null, fromTable: boolean) => void
   export let prominence: number
   export let minDistance: number
   export let minHeight: number | null
   export let mode: 'maxima' | 'minima'
+  export let auto: boolean
   export let onModeChange: (mode: 'maxima' | 'minima') => void
   export let onParametersChange: () => void
   export let onDetectionComplete: () => void
 
+  const PEAK_MODES = [
+    { id: 'maxima', label: 'Maxima', help: 'Detect local maxima (e.g. absorbance bands).' },
+    { id: 'minima', label: 'Minima', help: 'Detect local minima (e.g. transmittance dips).' },
+  ] as const
+
+  const HELP = {
+    auto: 'Recomputed from the data at every detection. Prominence is the larger of the white-noise range 2σ√(2 ln n) (σ from second differences) and twice the digitisation step; each peak must also exceed the noise range around it, so noisy high-absorbance regions add no false peaks. Min distance is half the median FWHM of the more prominent bands and stays 1 when no band is found. The fields show the values of the last detection; editing one switches automatic mode off.',
+    prominence: 'Minimum height a peak must rise above the higher of its two surrounding valleys. Lower values also detect smaller, subtler peaks.',
+    minDistance: 'Minimum number of data points between two neighbouring peaks. Higher values suppress closely spaced duplicates.',
+    minHeight: 'Minimum ordinate value a point must reach to qualify as a peak. Leave empty to disable this threshold.',
+  }
+
   let detecting = false
-  let heatmapOpen = false
-  let heatmapLoading = false
-  let heatmapProminenceValues: number[] = []
-  let heatmapDistanceValues: number[] = []
-  let heatmapCounts: number[][] = []
   let peakViewEl: HTMLDivElement | null = null
   let settingsWidthPx = 304
 
@@ -29,7 +40,7 @@
   }
 
   function handleModeChange(event: Event): void {
-    const nextMode = (event.target as HTMLSelectElement).value as 'maxima' | 'minima'
+    const nextMode = (event.target as HTMLInputElement).value as 'maxima' | 'minima'
     mode = nextMode
     prominence = nextMode === 'minima' ? -Math.abs(prominence) : Math.abs(prominence)
     projectStore.setPeakDetectionMode(dataset.id, nextMode)
@@ -47,6 +58,7 @@
         minDistance,
         minHeight,
         mode,
+        auto,
       })
       onDetectionComplete()
     } finally {
@@ -54,80 +66,40 @@
     }
   }
 
-  function buildHeatmapAxisValues(): { prominenceValues: number[]; distanceValues: number[] } {
-    const values = dataset.data.ordinateModified.filter(Number.isFinite)
-    const min = values.length ? Math.min(...values) : 0
-    const max = values.length ? Math.max(...values) : 0
-    const range = Math.max(max - min, 1e-6)
-
-    return {
-      prominenceValues: Array.from({ length: 8 }, (_, i) => {
-        const t = i / 7
-        const value = Number((range * (0.002 + t * 0.25)).toFixed(6))
-        return mode === 'minima' ? -value : value
-      }),
-      distanceValues: Array.from({ length: 8 }, (_, i) => {
-        const t = i / 7
-        return Math.max(1, Math.round(1 + t * 39))
-      }),
-    }
-  }
-
-  async function runPeakHeatmap(): Promise<void> {
-    heatmapLoading = true
-    const { prominenceValues, distanceValues } = buildHeatmapAxisValues()
-    heatmapProminenceValues = prominenceValues
-    heatmapDistanceValues = distanceValues
-
-    try {
-      const counts = await projectStore.computePeakHeatmap(dataset.id, {
-        prominenceValues,
-        distanceValues,
-        minHeight,
-        mode,
-      })
-      heatmapCounts = counts ?? []
-    } finally {
-      heatmapLoading = false
-    }
-  }
-
-  function toggleHeatmap(): void {
-    heatmapOpen = !heatmapOpen
-    if (heatmapOpen) void runPeakHeatmap()
-  }
-
-  function handleHeatmapSelect(event: CustomEvent<{ prominence: number; distance: number }>): void {
-    const selectedProminence = Number(event.detail.prominence.toFixed(6))
-    prominence = mode === 'minima' ? -Math.abs(selectedProminence) : Math.abs(selectedProminence)
-    minDistance = Math.max(1, Math.round(event.detail.distance))
+  function handleAutoChange(event: Event): void {
+    auto = (event.target as HTMLInputElement).checked
     onParametersChange()
-    heatmapOpen = false
+  }
+
+  // Typing a value takes the parameters out of automatic mode.
+  function handleManualChange(): void {
+    auto = false
+    onParametersChange()
+  }
+
+  $: isIr = dataset.spectrumType === 'ir'
+  $: shapes = computeShapes(dataset)
+
+  // Recomputed from the current ordinate so the values follow processing and unit changes.
+  function computeShapes(item: SpectrumDataset): Map<string, PeakShape | null> {
+    const indices = item.peaks.map((peak) => peak.index).sort((a, b) => a - b)
+    const peakMode = item.peakDetection?.mode ?? 'maxima'
+    return new Map(item.peaks.map((peak) => {
+      const position = indices.indexOf(peak.index)
+      return [peak.id, peakShape(item.data.abscissa, item.data.ordinateModified, peak.index, peakMode, {
+        previous: indices[position - 1],
+        next: indices[position + 1],
+      })]
+    }))
+  }
+
+  function formatNumber(value: number | undefined): string {
+    if (value === undefined || !Number.isFinite(value)) return '—'
+    return Math.abs(value) >= 1e4 || (value !== 0 && Math.abs(value) < 1e-3) ? value.toExponential(3) : value.toPrecision(4)
   }
 
   function startColumnResize(event: PointerEvent): void {
-    if (!peakViewEl) return
-    event.preventDefault()
-    const startX = event.clientX
-    const startWidth = settingsWidthPx
-    const bounds = peakViewEl.getBoundingClientRect()
-    const maxWidth = Math.max(280, bounds.width - 320)
-
-    const handleMove = (moveEvent: PointerEvent): void => {
-      const delta = startX - moveEvent.clientX
-      settingsWidthPx = Math.min(maxWidth, Math.max(264, startWidth + delta))
-    }
-    const handleUp = (): void => {
-      window.removeEventListener('pointermove', handleMove)
-      window.removeEventListener('pointerup', handleUp)
-      document.body.style.cursor = ''
-      document.body.style.userSelect = ''
-    }
-
-    document.body.style.cursor = 'col-resize'
-    document.body.style.userSelect = 'none'
-    window.addEventListener('pointermove', handleMove)
-    window.addEventListener('pointerup', handleUp)
+    startSideColumnResize(event, peakViewEl, settingsWidthPx, (width) => { settingsWidthPx = width })
   }
 </script>
 
@@ -139,7 +111,7 @@
   <div class="peak-table-col">
     <div class="peak-table-heading">
       <div class="peak-table-title">
-        <h3>Peak Assignments</h3>
+        <h3>Peak Assignments <HelpTip label="Peak assignments" text="Click on the trace in the plot above to add a peak manually. Peak rows are also flagged ⚑ in the data table." /></h3>
         <button
           type="button"
           class="peak-series-toggle"
@@ -149,7 +121,6 @@
           on:click={() => peakSingleSeriesView.update((value) => !value)}
         >Only this series</button>
       </div>
-      <p class="peak-assignment-note">Click on the trace in the plot above to add a peak manually.</p>
     </div>
     {#if dataset.peaks.length === 0}
       <div class="sample-empty">No peaks yet. Run detection or click on the plot.</div>
@@ -160,10 +131,12 @@
             <tr>
               <th><QuantityLabel quantity={dataset.units.xQuantity ?? 'Abscissa'} unit={dataset.units.x} /></th>
               <th><QuantityLabel quantity={dataset.units.yQuantity ?? 'Ordinate'} unit={dataset.units.y} /></th>
-              <th>Prominence</th>
-              <th>Intensity</th>
+              <th title="Height above the higher flanking minimum, in ordinate units">Prominence / {dataset.units.y || '1'}</th>
+              <th title="Full width at half prominence">FWHM / {dataset.units.x || '1'}</th>
+              <th title="Band area above the valley-to-valley baseline">Area</th>
+              {#if isIr}<th>Intensity</th>{/if}
               <th>Label</th>
-              <th>Confidence</th>
+              {#if isIr}<th>Confidence</th>{/if}
               <th>Source</th>
               <th></th>
             </tr>
@@ -179,8 +152,10 @@
                   on:mouseenter={() => onPeakHover(dataset.id, peak.id, true)}
                   on:mouseleave={() => onPeakHover(dataset.id, null, true)}
                 >{peak.y.toFixed(4)} {dataset.units.y}</td>
-                <td>{peak.prominence !== undefined ? peak.prominence.toFixed(4) : '—'}</td>
-                <td>{peak.intensity ?? '—'}</td>
+                <td>{formatNumber(shapes.get(peak.id)?.prominence)}</td>
+                <td>{formatNumber(shapes.get(peak.id)?.fwhm)}</td>
+                <td>{formatNumber(shapes.get(peak.id)?.area)}</td>
+                {#if isIr}<td>{peak.intensity ?? '—'}</td>{/if}
                 <td>
                   <input
                     type="text"
@@ -190,8 +165,8 @@
                     on:input={(event) => projectStore.updatePeakLabel(dataset.id, peak.id, (event.target as HTMLInputElement).value)}
                   />
                 </td>
-                <td>{peak.confidence ?? '—'}</td>
-                <td>{peak.dataOrigin === 'original' ? 'original data' : peak.source}</td>
+                {#if isIr}<td>{peak.confidence ?? '—'}</td>{/if}
+                <td>{peak.source}</td>
                 <td>
                   <button
                     type="button"
@@ -219,102 +194,74 @@
 
   <aside class="peak-settings-col">
     <div class="peak-settings-header">
-      <h4>Peak Detection</h4>
-      <button type="button" class="ghost" on:click={toggleHeatmap}>
-        {heatmapOpen ? 'Back to Settings' : 'Parameter Heatmap'}
-      </button>
+      <h4>Peak detection</h4>
+      <div class="peak-mode-toggle" role="radiogroup" aria-label="Peak mode">
+        {#each PEAK_MODES as option (option.id)}
+          <label class:active={mode === option.id} title={option.help}>
+            <input type="radio" name={`peak-mode-${dataset.id}`} value={option.id} checked={mode === option.id} on:change={handleModeChange} />
+            {option.label}
+          </label>
+        {/each}
+      </div>
     </div>
 
-    {#if heatmapOpen}
-      <p class="peak-hint">Click a cell to apply that prominence / min distance combination.</p>
-      <div class="peak-heatmap-container">
-        <PeakHeatmap
-          prominenceValues={heatmapProminenceValues}
-          distanceValues={heatmapDistanceValues}
-          counts={heatmapCounts}
-          currentProminence={prominence}
-          currentDistance={minDistance}
-          loading={heatmapLoading}
-          on:select={handleHeatmapSelect}
+    <div class="peak-auto-row">
+      <label class="peak-auto-toggle">
+        <input type="checkbox" checked={auto} on:change={handleAutoChange} />
+        <span>Automatic parameters</span>
+      </label>
+      <HelpTip label="Automatic parameters" text={HELP.auto} />
+    </div>
+
+    <div class="peak-settings-fields">
+      <label for={`peak-prominence-${dataset.id}`}>
+        Prominence <HelpTip label="Prominence" text={HELP.prominence} />
+      </label>
+      <div class="peak-field-input">
+        <input id={`peak-prominence-${dataset.id}`} type="number" step="0.0001" bind:value={prominence} on:change={handleManualChange} />
+        {#if auto}<span class="peak-auto-tag" title="Value of the last automatic detection">auto</span>{/if}
+      </div>
+
+      <label for={`peak-distance-${dataset.id}`}>
+        Min distance <HelpTip label="Min distance" text={HELP.minDistance} />
+      </label>
+      <div class="peak-field-input">
+        <input id={`peak-distance-${dataset.id}`} type="number" min="0" step="1" bind:value={minDistance} on:change={handleManualChange} />
+        <span class="peak-field-unit">pts</span>
+        {#if auto}<span class="peak-auto-tag" title="Value of the last automatic detection">auto</span>{/if}
+      </div>
+
+      <label for={`peak-height-${dataset.id}`}>
+        Min height <HelpTip label="Min height" text={HELP.minHeight} />
+      </label>
+      <div class="peak-field-input">
+        <input
+          id={`peak-height-${dataset.id}`}
+          type="number"
+          step="0.01"
+          value={minHeight ?? ''}
+          placeholder="none"
+          on:input={(event) => {
+            const raw = (event.target as HTMLInputElement).value
+            minHeight = raw.trim().length > 0 ? Number(raw) : null
+          }}
+          on:change={onParametersChange}
         />
       </div>
-    {:else}
-      <div class="peak-settings-fields">
-        <label>
-          <span class="peak-field-label">Peak mode</span>
-          <select bind:value={mode} on:change={handleModeChange}>
-            <option value="maxima">Maxima</option>
-            <option value="minima">Minima</option>
-          </select>
-        </label>
-        <label>
-          <span class="peak-field-label">
-            Prominence
-            <button
-              type="button"
-              class="info-icon"
-              title="Minimum vertical distance a peak must stand above the surrounding baseline before it merges into a taller neighboring peak. Lower values detect smaller, subtler peaks."
-            >?</button>
-          </span>
-          <input
-            type="number"
-            step="0.0001"
-            bind:value={prominence}
-            on:change={onParametersChange}
-          />
-        </label>
-        <label>
-          <span class="peak-field-label">
-            Min distance (points)
-            <button
-              type="button"
-              class="info-icon"
-              title="Minimum number of abscissa samples required between two neighboring peaks. Higher values suppress closely spaced duplicate peaks."
-            >?</button>
-          </span>
-          <input
-            type="number"
-            min="0"
-            step="1"
-            bind:value={minDistance}
-            on:change={onParametersChange}
-          />
-        </label>
-        <label>
-          <span class="peak-field-label">
-            Min height
-            <button
-              type="button"
-              class="info-icon"
-              title="Minimum absolute y-value (signal intensity) a point must reach to qualify as a peak. Leave empty to disable this threshold."
-            >?</button>
-          </span>
-          <input
-            type="number"
-            step="0.01"
-            value={minHeight ?? ''}
-            placeholder="none"
-            on:input={(event) => {
-              const raw = (event.target as HTMLInputElement).value
-              minHeight = raw.trim().length > 0 ? Number(raw) : null
-            }}
-            on:change={onParametersChange}
-          />
-        </label>
-      </div>
-      <div class="peak-actions-row">
-        <button type="button" class="run" disabled={detecting} on:click={() => void runPeakDetection()}>
-          {detecting ? 'Detecting...' : 'Detect Peaks'}
-        </button>
-        <button
-          type="button"
-          class="ghost"
-          disabled={dataset.peaks.length === 0}
-          on:click={() => projectStore.clearPeaks(dataset.id)}
-        >
-          Clear Peaks
-        </button>
-      </div>
-    {/if}
+    </div>
+
+    <div class="peak-actions-row">
+      <button type="button" class="run" disabled={detecting} on:click={() => void runPeakDetection()}>
+        {detecting ? 'Detecting…' : 'Detect peaks'}
+      </button>
+      <button
+        type="button"
+        class="ghost"
+        disabled={dataset.peaks.length === 0}
+        on:click={() => projectStore.clearPeaks(dataset.id)}
+      >
+        Clear
+      </button>
+    </div>
   </aside>
 </div>

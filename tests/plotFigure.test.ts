@@ -42,6 +42,22 @@ describe('plot figure', () => {
     expect(figure.layout.yaxis).toMatchObject({ title: { text: 'Time / s' } })
   })
 
+  it('orders heatmap series by concentration metadata in the chosen unit', () => {
+    const withConcentration = [
+      { ...datasets[0], experimentMetadata: { Concentration: '2 mM' } },
+      { ...datasets[1], experimentMetadata: { 'c / µM': '500' } },
+    ]
+    const figure = buildPlotFigure({ datasets: withConcentration, plotStyle: style({ plotMode: 'heatmap', seriesField: 'concentration', seriesUnit: 'µM' }) })
+    expect(figure.traces[0]).toMatchObject({ type: 'heatmap', y: [500, 2000] })
+    expect(figure.layout.yaxis).toMatchObject({ title: { text: 'Concentration / µM' } })
+  })
+
+  it('falls back to series order with a notice when the third-axis value is missing', () => {
+    const figure = buildPlotFigure({ datasets, plotStyle: style({ plotMode: 'heatmap', seriesField: 'concentration', seriesUnit: 'mM' }) })
+    expect(figure.layout.yaxis).toMatchObject({ title: { text: 'Series number' } })
+    expect(figure.notices.join(' ')).toMatch(/No concentration found for t = 0 s, t = 1 min/)
+  })
+
   it('builds a WebGL surface with labelled scene axes and plain titles', () => {
     const figure = buildPlotFigure({ datasets, plotStyle: style({ plotMode: 'surface3d', axisLabelFormat: 'fraction', seriesUnit: 'min' }) })
     expect(figure.traces[0]).toMatchObject({ type: 'surface', y: [0, 1] })
@@ -65,5 +81,17 @@ describe('plot figure', () => {
     const figure = buildPlotFigure({ datasets: [datasets[0]], plotStyle: style({ plotMode: 'heatmap' }) })
     expect(figure.mode).toBe('overlay')
     expect(figure.notices.join(' ')).toMatch(/at least two/)
+  })
+
+  it('subscripts the ordinate with "norm" only when every plotted series is normalised', () => {
+    const normalised = (item: SpectrumDataset): SpectrumDataset => ({
+      ...item,
+      pipeline: [{ id: 'n', type: 'normalization', scope: 'individual', enabled: true, params: { mode: 'minmax' } }],
+    })
+    const all = buildPlotFigure({ datasets: datasets.map(normalised), plotStyle: style({}) })
+    expect(all.layout.yaxis).toMatchObject({ title: { text: 'Absorbance<sub>norm</sub>' } })
+    const mixed = buildPlotFigure({ datasets: [normalised(datasets[0]), datasets[1]], plotStyle: style({}) })
+    expect(mixed.layout.yaxis).toMatchObject({ title: { text: 'Absorbance' } })
+    expect(mixed.notices.join(' ')).toMatch(/Normalisation is enabled for 1 of 2/)
   })
 })

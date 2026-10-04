@@ -1,7 +1,9 @@
 import { get } from 'svelte/store'
-import { transitionSyncState } from '../services/script/syncStateMachine'
+import { transitionSyncState, type SyncEvent } from '../services/script/syncStateMachine'
+import type { AppState } from '../types/project'
 import { effectivePythonFiles, type PythonFileName } from '../services/script/scriptGenerator'
-import { appState, workerClient, scheduleAutosave, regenerateScript, logScriptDebug, appendScriptOutput } from './projectContext'
+import { appState, workerClient, persist, regenerateScript } from './projectContext'
+import { appendScriptOutput, patchRuntime } from './runtimeState'
 import { computePrecision } from './computeSettings'
 import { ExecutionCache, scriptExecutionKey } from './executionCache'
 import { applyScriptResult } from './scriptResult'
@@ -57,8 +59,7 @@ export function resetScriptExecutionCache(): void {
 }
 
 function finishExecution(appliedCount: number, total: number, errors: string[]): void {
-  appState.update((current) => ({
-    ...current,
+  patchRuntime({
     workerBusy: false,
     workerLastError: errors.length > 0
       ? `Script applied to ${appliedCount}/${total} samples. First error: ${errors[0]}`
@@ -69,7 +70,7 @@ function finishExecution(appliedCount: number, total: number, errors: string[]):
       total,
       message: errors.length > 0 ? 'Execution finished with errors' : 'Execution finished',
     },
-  }))
+  })
   appendScriptOutput(errors.length > 0
     ? `Execution finished with errors (${appliedCount}/${total} samples applied).`
     : `Execution finished successfully (${appliedCount} sample${appliedCount === 1 ? '' : 's'} applied).`)
@@ -99,17 +100,9 @@ async function runScriptExecution({ datasetIds, options }: ScriptExecutionReques
   const sampleIds = selected.map(({ dataset }) => dataset.id)
   const labels = new Map(selected.map(({ dataset }) => [dataset.id, dataset.style.label]))
   const keys = new Map(selected.map(({ dataset, key }) => [dataset.id, key]))
-  logScriptDebug('execute_script_start', {
-    selectedCount: selected.length,
-    skippedCount: candidates.length - selected.length,
-    datasetIds: sampleIds,
-    precision,
-    syncMode: state.syncMode,
-  })
   appendScriptOutput(`Running processing for ${selected.length} changed sample${selected.length === 1 ? '' : 's'} (${precision}); ${candidates.length - selected.length} unchanged skipped.`)
 
-  appState.update((current) => ({
-    ...current,
+  patchRuntime({
     workerBusy: true,
     workerLastError: null,
     scriptProgress: {
@@ -118,7 +111,7 @@ async function runScriptExecution({ datasetIds, options }: ScriptExecutionReques
       total: selected.length,
       message: `Processing ${selected.length} sample${selected.length === 1 ? '' : 's'}`,
     },
-  }))
+  })
 
   let appliedCount = 0
   const errors: string[] = []
@@ -149,6 +142,7 @@ async function runScriptExecution({ datasetIds, options }: ScriptExecutionReques
         continue
       }
       let outcome = ''
+      let applied = false
       appState.update((current) => {
         const item = current.datasets.find((candidate) => candidate.id === result.id)
         // Inputs edited during the run make this result obsolete; the follow-up run replaces it.
@@ -165,25 +159,24 @@ async function runScriptExecution({ datasetIds, options }: ScriptExecutionReques
           return current
         }
         appliedCount += 1
+        applied = true
         executionCache.remember(updated.id, keys.get(result.id) ?? '')
         const removed = result.ordinateModified.filter((value) => Number.isNaN(value)).length
         outcome = `${label}: processed ${result.ordinateModified.length - removed} points${removed ? ` (${removed} outside the crop window)` : ''}.`
-        const nextState = {
+        return persist({
           ...current,
           datasets: current.datasets.map((candidate) => candidate.id === updated.id ? updated : candidate),
-          updatedAt: new Date().toISOString(),
-          scriptProgress: { ...current.scriptProgress, completed: appliedCount, message: `Processed ${label}` },
-        }
-        scheduleAutosave(nextState)
-        return nextState
+        })
       })
+      if (applied) {
+        patchRuntime((runtime) => ({ scriptProgress: { ...runtime.scriptProgress, completed: appliedCount, message: `Processed ${label}` } }))
+      }
       appendScriptOutput(outcome)
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown script execution failure'
     errors.push(message)
     appendScriptOutput(`Execution failed: ${message}`)
-    logScriptDebug('execute_script_error', { datasetIds: sampleIds, message })
   } finally {
     finishExecution(appliedCount, selected.length, errors)
   }
@@ -194,81 +187,32 @@ export function setScriptOverride(value: string): void {
 }
 
 export function setPythonFileOverride(fileName: PythonFileName, value: string): void {
-  appState.update((state) => {
-    const syncResult = transitionSyncState(
-      { mode: state.syncMode, scriptSyncEnabled: state.scriptSyncEnabled },
-      { type: 'SCRIPT_MANUAL_EDIT' },
-    )
+  applySyncEvent({ type: 'SCRIPT_MANUAL_EDIT' }, (state) => ({
+    userScriptOverride: fileName === 'main.py' ? value : state.userScriptOverride,
+    pythonFileOverrides: { ...state.pythonFileOverrides, [fileName]: value },
+  }))
+}
 
-    const nextState = {
-      ...state,
-      userScriptOverride: fileName === 'main.py' ? value : state.userScriptOverride,
-      pythonFileOverrides: {
-        ...state.pythonFileOverrides,
-        [fileName]: value,
-      },
-      syncMode: syncResult.mode,
-      scriptSyncEnabled: syncResult.scriptSyncEnabled,
-      updatedAt: new Date().toISOString(),
-    }
-
-    logScriptDebug('script_override_updated', {
-      scriptLength: value.length,
-      syncMode: nextState.syncMode,
-      scriptSyncEnabled: nextState.scriptSyncEnabled,
-    })
-
-    scheduleAutosave(nextState)
-    return nextState
-  })
+/** Discards manual script edits and returns to the script generated from the GUI state. */
+function resetToGeneratedScript(event: SyncEvent): void {
+  applySyncEvent(event, (state) => ({
+    generatedScript: regenerateScript(state.datasets),
+    userScriptOverride: null,
+    pythonFileOverrides: {},
+  }))
 }
 
 export function revertScriptToGuiState(): void {
-  appState.update((state) => {
-    const syncResult = transitionSyncState(
-      { mode: state.syncMode, scriptSyncEnabled: state.scriptSyncEnabled },
-      { type: 'REVERT_TO_GUI' },
-    )
-
-    const nextState = {
-      ...state,
-      generatedScript: regenerateScript(state.datasets),
-      userScriptOverride: null,
-      pythonFileOverrides: {},
-      syncMode: syncResult.mode,
-      scriptSyncEnabled: syncResult.scriptSyncEnabled,
-      updatedAt: new Date().toISOString(),
-    }
-
-    logScriptDebug('revert_to_gui_state', {
-      datasetCount: state.datasets.length,
-      syncMode: nextState.syncMode,
-      scriptSyncEnabled: nextState.scriptSyncEnabled,
-    })
-
-    scheduleAutosave(nextState)
-    return nextState
-  })
+  resetToGeneratedScript({ type: 'REVERT_TO_GUI' })
 }
 
 export function confirmOverwriteForGuiEdits(): void {
+  resetToGeneratedScript({ type: 'CONFIRM_OVERWRITE' })
+}
+
+function applySyncEvent(event: SyncEvent, patch: (state: AppState) => Partial<AppState>): void {
   appState.update((state) => {
-    const syncResult = transitionSyncState(
-      { mode: state.syncMode, scriptSyncEnabled: state.scriptSyncEnabled },
-      { type: 'CONFIRM_OVERWRITE' },
-    )
-
-    const nextState = {
-      ...state,
-      userScriptOverride: null,
-      pythonFileOverrides: {},
-      generatedScript: regenerateScript(state.datasets),
-      syncMode: syncResult.mode,
-      scriptSyncEnabled: syncResult.scriptSyncEnabled,
-      updatedAt: new Date().toISOString(),
-    }
-
-    scheduleAutosave(nextState)
-    return nextState
+    const sync = transitionSyncState({ mode: state.syncMode, scriptSyncEnabled: state.scriptSyncEnabled }, event)
+    return persist({ ...state, ...patch(state), syncMode: sync.mode, scriptSyncEnabled: sync.scriptSyncEnabled })
   })
 }

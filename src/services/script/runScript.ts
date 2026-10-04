@@ -1,4 +1,4 @@
-import type { SpectrumDataset } from '../../types/project'
+import { DEFAULT_PEAK_DETECTION, type SpectrumDataset } from '../../types/project'
 
 export const RUNNER_DIRECTORY = '/tmp/spectraliser_scripts'
 
@@ -15,7 +15,7 @@ export function runnerMetadata(dataset: SpectrumDataset): RunnerSampleMetadata {
     spectrumType: dataset.spectrumType,
     units: { x: dataset.units.x, y: dataset.units.y },
     pipeline: dataset.pipeline,
-    peakDetection: dataset.peakDetection ?? { prominence: 0.01, minDistance: 1, minHeight: null, mode: 'maxima' },
+    peakDetection: dataset.peakDetection ?? { ...DEFAULT_PEAK_DETECTION },
   }
 }
 

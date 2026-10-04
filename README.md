@@ -16,6 +16,32 @@ Run the scientific rule tests with:
 PYTHONPATH=src/python python3 -m unittest discover -s tests -p 'test_*.py'
 ```
 
+## Experiment metadata
+
+Each sample's **Data** tab has a metadata box next to the data table. Add
+fields there as *Time* (number or `HH:MM:SS` with a unit), *Concentration*
+(molar or mass units) or a custom name with value and unit. Time,
+concentration or any numeric custom field can be chosen as the third axis of
+heatmap and 3D plots in General settings → Appearance; time and concentration
+are converted into the chosen axis unit, and series without a usable value are
+placed by their order with a notice. Rows that are peaks are flagged ⚑ in the
+data table.
+
+Use **Metadata** in the toolbar to import an experiment table from CSV. Choose
+the table delimiter, the dataset field to match, and the corresponding key
+column. Matches are exact and case-sensitive; duplicate keys in the table,
+missing keys, unmatched keys, and non-unique dataset keys are reported and
+prevent partial imports. Rows may cover only some datasets; uncovered datasets
+remain without linked metadata. Each non-key column becomes a dataset metadata
+field, blank cells are stored as `null`, and a later import updates matching
+field names while preserving other metadata already linked to that dataset.
+
+For a file containing multiple spectral series, match on the series label (the
+individual label visible in the data table), not the shared file name or source
+path. Dataset IDs are shown in each dataset's metadata box and can also be used
+when preparing an ID-keyed table. Linked fields are displayed below the
+numerical data table and are saved with the project/autosave.
+
 ## Editable Python files
 
 The Script tab has a scrollable file list on the left and one editor on the right.

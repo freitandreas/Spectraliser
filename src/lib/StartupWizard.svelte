@@ -25,6 +25,7 @@
   import PlotModeSettings from './PlotModeSettings.svelte'
   import StartupPlotPreview from './StartupPlotPreview.svelte'
   import ComputePrecisionSettings from './ComputePrecisionSettings.svelte'
+  import HelpTip from './HelpTip.svelte'
 
   export let open = false
   export let initialPreferences: StartupPreferences = DEFAULT_STARTUP_PREFERENCES
@@ -104,8 +105,7 @@
         <div class="startup-content">
           {#if step === 'defaults'}
             <section class="startup-section">
-              <h2>Spectrum type</h2>
-              <p>One spectrum type per project. The import wizard starts with this type.</p>
+              <h2>Spectrum type <HelpTip label="Spectrum type" text="One spectrum type per project. The import wizard starts with this type." /></h2>
               <div class="startup-type-options" role="group" aria-label="Default spectrum type">
                 {#each spectrumTypes as type (type.id)}
                   <button type="button" class:chosen={draft.spectrumType === type.id} aria-pressed={draft.spectrumType === type.id} on:click={() => chooseSpectrumType(type.id)}>
@@ -116,14 +116,12 @@
             </section>
 
             <section class="startup-section">
-              <h2>Spectrum plot</h2>
-              <p>How several series, e.g. a time-resolved measurement, are displayed.</p>
+              <h2>Spectrum plot <HelpTip label="Spectrum plot" text="How several series, e.g. a time-resolved measurement, are displayed." /></h2>
               <PlotModeSettings plotStyle={draft.plotStyle} onChange={(next) => { draft.plotStyle = next }} />
             </section>
 
             <section class="startup-section">
-              <h2>Plot quantities and units</h2>
-              <p>Imported data in compatible units are converted numerically into these units.</p>
+              <h2>Plot quantities and units <HelpTip label="Plot quantities and units" text="Imported data in compatible units are converted numerically into these units." /></h2>
               <div class="axis-grid">
                 <label>
                   Abscissa quantity
@@ -166,19 +164,17 @@
           {/if}
           {#if step === 'advanced' && advancedView === 'computation'}
             <section class="startup-section">
-              <h2>Computation</h2>
-              <p>Precision of the numeric arrays the Python processing script works on.</p>
+              <h2>Computation <HelpTip label="Computation" text="Precision of the numeric arrays the Python processing script works on." /></h2>
               <ComputePrecisionSettings precision={draft.computePrecision} onChange={(next) => { draft.computePrecision = next }} />
             </section>
           {:else if step === 'advanced'}
             <section class="startup-section">
-              <h2>Plot appearance</h2>
-              <p>These match the plot settings used in the workspace.</p>
+              <h2>Plot appearance <HelpTip label="Plot appearance" text="These match the plot settings used in the workspace." /></h2>
               <div class="startup-template-list" role="group" aria-label="Plot style templates">
                 {#each templates as template (template.id)}
-                  <button type="button" class:chosen={draft.plotStyle.template === template.id} aria-pressed={draft.plotStyle.template === template.id} on:click={() => chooseTemplate(template.id)}>
+                  <button type="button" class:chosen={draft.plotStyle.template === template.id} aria-pressed={draft.plotStyle.template === template.id} title={template.detail} on:click={() => chooseTemplate(template.id)}>
                     <span class={`template-glyph ${template.id}`} aria-hidden="true"><span></span><span></span><span></span></span>
-                    <span class="template-copy"><strong>{template.title}</strong><small>{template.detail}</small></span>
+                    <span class="template-copy"><strong>{template.title}</strong></span>
                   </button>
                 {/each}
               </div>
@@ -195,8 +191,7 @@
             </section>
 
             <section class="startup-section">
-              <h2>Axis labels</h2>
-              <p>How the physical quantity and unit are combined in axis titles.</p>
+              <h2>Axis labels <HelpTip label="Axis labels" text="How the physical quantity and unit are combined in axis titles. Fractions are typeset with MathJax; 3D scene titles cannot render TeX and use “quantity / unit”." /></h2>
               <div class="label-formats" role="radiogroup" aria-label="Axis label format">
                 {#each AXIS_LABEL_FORMATS as format (format.id)}
                   <label class="label-format" class:chosen={draft.plotStyle.axisLabelFormat === format.id}>
@@ -206,14 +201,10 @@
                   </label>
                 {/each}
               </div>
-              {#if draft.plotStyle.axisLabelFormat === 'fraction'}
-                <small>Fractions are typeset with MathJax; 3D scene titles cannot render TeX and use “quantity / unit”.</small>
-              {/if}
             </section>
 
             <section class="startup-section">
-              <h2>Quantity notation</h2>
-              <p>Show physical quantities by full name or by IUPAC symbol in plots, previews and data tables.</p>
+              <h2>Quantity notation <HelpTip label="Quantity notation" text="Show physical quantities by full name or by IUPAC symbol in plots, previews and data tables." /></h2>
               <div class="label-formats" role="radiogroup" aria-label="Quantity notation">
                 {#each QUANTITY_NOTATIONS as notation (notation.id)}
                   <label class="label-format" class:chosen={draft.plotStyle.quantityNotation === notation.id}>
@@ -261,19 +252,17 @@
   .startup-preview-column{position:sticky;top:0;align-self:start;padding:20px 24px 20px 0}
   .startup-section{padding:18px 0;border-bottom:1px solid #373b41}
   .startup-section:last-child{border-bottom:0}
-  .startup-section h2{margin:0 0 5px;font-size:.98rem}
-  .startup-section>p{margin:0 0 14px;color:#9ca4ab;font-size:.77rem;line-height:1.45}
+  .startup-section h2{display:flex;align-items:center;gap:6px;margin:0 0 12px;font-size:.98rem}
   .startup-type-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
   .startup-type-options button,.startup-template-list button{display:flex;min-width:0;align-items:flex-start;gap:7px;border:1px solid #3b4148;border-radius:7px;background:#252a30;color:#d9dde0;text-align:left;cursor:pointer}
   .startup-type-options button{flex-direction:column;min-height:58px;padding:10px}
   .startup-type-options strong,.template-copy strong{font-size:.78rem}
-  .startup-type-options span,.template-copy small{color:#9ca4ab;font-size:.68rem;line-height:1.35}
+  .startup-type-options span{color:#9ca4ab;font-size:.68rem;line-height:1.35}
   .startup-type-options button.chosen,.startup-template-list button.chosen,.label-format.chosen{border-color:#7ca6b5;background:#2b353a;box-shadow:inset 0 0 0 1px rgba(124,166,181,.16)}
   .axis-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
   label{display:grid;gap:6px;color:#c2c7cb;font-size:.75rem}
   input,select{min-width:0;background:#1c1c20;color:#d4d4d4;border:1px solid #3f3f46;border-radius:6px;padding:8px}
   input[type=checkbox],input[type=radio]{accent-color:#86aebc}
-  small{color:#9ca4ab;font-size:.68rem;line-height:1.4}
   code{color:#c5d9e2;font-size:.7rem}
   .startup-template-list{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}
   .startup-template-list button{align-items:center;padding:8px}

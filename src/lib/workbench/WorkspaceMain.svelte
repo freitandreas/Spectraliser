@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { SpectrumDataset } from '../../types/project'
   import { tick } from 'svelte'
   import PlotPanel from '../PlotPanel.svelte'
   import { projectStore } from '../../state/projectStore'
@@ -11,12 +12,12 @@
   import { peakSingleSeriesView } from '../../state/displaySettings'
   import { singleSeriesView, type PlotView } from '../plot/singleSeriesView'
 
-  export let visibleDatasets: any[]
+  export let visibleDatasets: SpectrumDataset[]
   export let selectedSpectrumId: string | null
   export let activeWorkspaceTab: string
   export let activeSampleSubView: SampleSubView
-  export let activeSampleTabDataset: any | null
-  export let openedSampleTabs: Array<{ tabId: string; dataset: any; subView: SampleSubView }>
+  export let activeSampleTabDataset: SpectrumDataset | null
+  export let openedSampleTabs: Array<{ tabId: string; dataset: SpectrumDataset; subView: SampleSubView }>
   export let bottomPanelOpen: boolean
   export let bottomPanelHeight: number
   export let highlightedDatasetId: string | null = null
@@ -27,9 +28,10 @@
   export let onActivateScript: () => void
   export let onCloseTab: (tabId: string) => void
   export let onCloseBottomPanel: () => void
+  export let onLinkMetadata: (() => void) | null = null
 
   let mainEl: HTMLElement | null = null
-  let scriptWorkspace: any = null
+  let scriptWorkspace: ScriptWorkspace | null = null
   let hoverSelection: { datasetId: string; pointIndex: number } | null = null
   let peakHoverSelection: { datasetId: string; peakId: string } | null = null
   let peakZoomPeakId: string | null = null
@@ -37,11 +39,12 @@
   let peakMinDistance = 1
   let peakMinHeight: number | null = null
   let peakMode: 'maxima' | 'minima' = 'maxima'
+  let peakAuto = false
   let scriptExecutionTrigger = 0
 
   $: peakPanelActive = activeSampleSubView === 'peaks' && activeWorkspaceTab !== 'script_view' && !!activeSampleTabDataset
   let plotView: PlotView
-  $: plotView = peakPanelActive && $peakSingleSeriesView
+  $: plotView = peakPanelActive && $peakSingleSeriesView && activeSampleTabDataset
     ? singleSeriesView(activeSampleTabDataset, plotStyle)
     : { datasets: visibleDatasets, plotStyle, selectedSpectrumId }
 
@@ -59,6 +62,7 @@
     peakMinDistance = activeSampleTabDataset.peakDetection.minDistance
     peakMinHeight = activeSampleTabDataset.peakDetection.minHeight
     peakMode = activeSampleTabDataset.peakDetection.mode
+    peakAuto = activeSampleTabDataset.peakDetection.auto === true
   }
 
   // Hover state fans out to the plot and both tables; it is only reassigned when it actually changes.
@@ -129,6 +133,7 @@
       minDistance: peakMinDistance,
       minHeight: peakMinHeight,
       mode: peakMode,
+      auto: peakAuto,
     })
   }
 
@@ -191,6 +196,7 @@
             dataset={activeSampleTabDataset}
             {hoverSelection}
             onHover={setHoverSelection}
+            {onLinkMetadata}
           />
         {:else}
           <PeakWorkspace
@@ -201,6 +207,7 @@
             bind:minDistance={peakMinDistance}
             bind:minHeight={peakMinHeight}
             bind:mode={peakMode}
+            bind:auto={peakAuto}
             onModeChange={handlePeakModeChange}
             onParametersChange={handlePeakParametersChange}
             onDetectionComplete={triggerScriptExecution}

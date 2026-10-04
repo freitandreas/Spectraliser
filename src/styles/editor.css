@@ -1,15 +1,4 @@
 
-.peak-heatmap-container {
-  flex: 1;
-  min-height: 240px;
-}
-
-.peak-hint {
-  margin: 0;
-  font-size: 0.8rem;
-  color: var(--text-dim);
-}
-
 .peak-label-input {
   width: 100%;
   min-width: 90px;
@@ -561,6 +550,9 @@
 }
 
 .confirm-modal h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   margin: 0 0 8px;
   font-size: 1rem;
 }
@@ -578,35 +570,11 @@
   gap: 8px;
 }
 
-.general-settings {
-  display: grid;
-  gap: 12px;
-  align-content: start;
-  overflow: auto;
-  max-height: 100%;
-  padding-right: 3px;
-}
-
 .general-settings-hint {
   margin: 0;
   font-size: 0.82rem;
   color: var(--text-dim);
   line-height: 1.4;
-}
-
-.general-settings-group {
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: #1f1f23;
-  padding: 10px 12px;
-  display: grid;
-  gap: 8px;
-}
-
-.general-settings-value {
-  font-size: 0.8rem;
-  color: var(--text-dim);
-  margin-top: -6px;
 }
 
 .palette-preview {
@@ -665,10 +633,5 @@
 
   .right-sidebar {
     min-height: 220px;
-  }
-
-  .transform-top,
-  .transform-grid {
-    grid-template-columns: 1fr;
   }
 }

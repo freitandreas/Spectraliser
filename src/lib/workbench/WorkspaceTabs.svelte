@@ -1,7 +1,8 @@
 <script lang="ts">
+  import type { SpectrumDataset } from '../../types/project'
   import type { SampleSubView } from './workbenchUtils'
 
-  export let openedSampleTabs: Array<{ tabId: string; dataset: any; subView: SampleSubView }>
+  export let openedSampleTabs: Array<{ tabId: string; dataset: SpectrumDataset; subView: SampleSubView }>
   export let activeWorkspaceTab: string
   export let onOpenSubTab: (datasetId: string, subView: SampleSubView) => void
   export let onActivateScript: () => void

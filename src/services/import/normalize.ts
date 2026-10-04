@@ -3,7 +3,22 @@ import type { ParsedSpectrumSeries } from './parsers'
 import type { StartupAxisPreferences } from '../startupPreferences'
 import { axisDefaultsFor } from '../spectrumPresets'
 import { convertAbscissa } from './unitConversion'
-import { percentScaleFactor } from '../spectrumPresets'
+import { ordinateUnitFactor } from '../spectrumPresets'
+import { finiteRange } from '../numeric'
+
+const FRACTION_QUANTITIES = ['transmittance', 'reflectance']
+
+/**
+ * Source ordinate unit when the header states none. Transmittance and reflectance are
+ * bounded, so values above 1.5 can only be percent; anything else is taken to be
+ * recorded in the target unit already rather than rescaled on a guess.
+ */
+function inferSourceOrdinateUnit(series: ParsedSpectrumSeries, targetAxes: StartupAxisPreferences): string {
+  const quantity = (series.yQuantity ?? targetAxes.yQuantity).trim().toLowerCase()
+  if (!FRACTION_QUANTITIES.includes(quantity)) return targetAxes.yUnit
+  const range = finiteRange(series.ordinate)
+  return range && range[1] > 1.5 ? '%' : ''
+}
 
 export function normalizeImportedSeries(
   series: ParsedSpectrumSeries,
@@ -20,7 +35,7 @@ export function normalizeImportedSeries(
 } {
   const defaults = axisDefaultsFor(spectrumType)
   const sourceXUnit = series.xUnit ?? defaults.x
-  const sourceYUnit = series.yUnit ?? defaults.y
+  const sourceYUnit = series.yUnit ?? inferSourceOrdinateUnit(series, targetAxes)
   let abscissa = series.abscissa
   let ordinate = series.ordinate
 
@@ -40,7 +55,7 @@ export function normalizeImportedSeries(
   if (sourceXUnit !== targetAxes.xUnit) {
     abscissa = convertAbscissa(abscissa, sourceXUnit, targetAxes.xUnit)
   }
-  const yScale = percentScaleFactor(sourceYUnit, targetAxes.yUnit)
+  const yScale = ordinateUnitFactor(sourceYUnit, targetAxes.yUnit)
   if (yScale !== null) ordinate = ordinate.map((value) => value * yScale)
 
   return {

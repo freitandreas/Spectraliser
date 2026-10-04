@@ -97,6 +97,8 @@ export function buildPreviewDatasets(spectrumType: SpectrumType, axes: StartupAx
         ...getSpectrumStyleDefaults(spectrumType),
       },
       peaks: [],
+      // Both standard third-axis fields are present so the preview follows the chosen axis.
+      experimentMetadata: { Time: `${time} s`, Concentration: `${(1 - progress).toFixed(3)} mM` },
     }
   })
   return { datasets, notices }

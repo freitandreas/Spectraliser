@@ -1,4 +1,5 @@
 <script lang="ts">
+  import HelpTip from '../HelpTip.svelte'
   import { onMount } from 'svelte'
   import { Compartment, EditorState, Transaction } from '@codemirror/state'
   import { EditorView, keymap, lineNumbers, highlightActiveLine } from '@codemirror/view'
@@ -7,6 +8,8 @@
   import { oneDark } from '@codemirror/theme-one-dark'
   import { projectStore } from '../../state/projectStore'
   import { computePrecision } from '../../state/computeSettings'
+  import { runtimeState } from '../../state/runtimeState'
+  import { arrayId } from '../../services/arrayIdentity'
   import {
     effectivePythonFiles,
     PROJECT_FILE_NAMES,
@@ -24,7 +27,6 @@
   let suppressEditorSync = false
   let autoExecuteTimer: number | null = null
   let pendingAutoRun = false
-  let lastDebugSignature = ''
   let selectedFile: ProjectFileName = 'main.py'
   const readOnlyCompartment = new Compartment()
   let outputViewActive = false
@@ -46,17 +48,6 @@
   // labels) is written to samples.json and must not trigger execution. Array
   // identity is enough because imports and conversions always create new arrays.
   $: scriptInputSignature = signatureOf($projectStore.datasets, $computePrecision)
-
-  const arrayIds = new WeakMap<number[], number>()
-  let nextArrayId = 1
-  function arrayId(values: number[]): number {
-    let id = arrayIds.get(values)
-    if (id === undefined) {
-      id = nextArrayId++
-      arrayIds.set(values, id)
-    }
-    return id
-  }
 
   function signatureOf(datasets: typeof $projectStore.datasets, precision: string): string {
     return JSON.stringify([precision, datasets.map((dataset) => [
@@ -81,27 +72,6 @@
   $: if (executionTrigger !== lastExecutionTrigger) {
     lastExecutionTrigger = executionTrigger
     if (autoExecute) scheduleAutoExecute()
-  }
-
-  $: {
-    const signature = [
-      $projectStore.syncMode,
-      $projectStore.scriptSyncEnabled ? 'sync-on' : 'sync-off',
-      $projectStore.userScriptOverride === null ? 'generated' : 'override',
-      String($projectStore.generatedScript.length),
-      String($projectStore.userScriptOverride?.length ?? 0),
-    ].join('|')
-
-    if (signature !== lastDebugSignature) {
-      lastDebugSignature = signature
-      console.debug('[script-debug] editor_script_source', {
-        syncMode: $projectStore.syncMode,
-        scriptSyncEnabled: $projectStore.scriptSyncEnabled,
-        source: $projectStore.userScriptOverride === null ? 'generatedScript' : 'userScriptOverride',
-        generatedLength: $projectStore.generatedScript.length,
-        overrideLength: $projectStore.userScriptOverride?.length ?? 0,
-      })
-    }
   }
 
   function ensureCodeMirror(): void {
@@ -256,32 +226,32 @@
         type="button"
         class="output-tab"
         class:current={outputViewActive}
-        class:has-error={Boolean($projectStore.workerLastError)}
+        class:has-error={Boolean($runtimeState.workerLastError)}
         aria-current={outputViewActive ? 'page' : undefined}
         on:click={() => { outputViewActive = true }}
       >
-        Output{#if $projectStore.workerLastError}<span aria-label="error"> !</span>{/if}
+        Output{#if $runtimeState.workerLastError}<span aria-label="error"> !</span>{/if}
       </button>
     </nav>
 
     {#if outputViewActive}
       <div class="script-output-pane" aria-live="polite">
-        {#if $projectStore.workerLastError}
+        {#if $runtimeState.workerLastError}
           <div class="script-error-pane" role="alert" aria-live="assertive">
             <div class="script-error-header">Script execution error</div>
-            <pre>{$projectStore.workerLastError}</pre>
+            <pre>{$runtimeState.workerLastError}</pre>
           </div>
         {/if}
-        {#if $projectStore.scriptOutput.length > 0}
-          <pre class="script-console">{$projectStore.scriptOutput.join('\n')}</pre>
-        {:else if !$projectStore.workerLastError}
+        {#if $runtimeState.scriptOutput.length > 0}
+          <pre class="script-console">{$runtimeState.scriptOutput.join('\n')}</pre>
+        {:else if !$runtimeState.workerLastError}
           <div class="script-output-empty">No output yet. Run the script to see logs or exceptions here.</div>
         {/if}
       </div>
     {:else}
       <div class="script-editor-pane">
         {#if selectedFile === 'main.py'}
-          <p class="file-note">Standalone entry for the exported project. In the app, each execution generates its own runner that sends only the changed samples through processing.py and ir_assignments.py, so edits here do not trigger a run.</p>
+          <p class="file-note">Standalone entry for exported projects <HelpTip label="main.py" text="In the app, each execution generates its own runner that sends only the changed samples through processing.py and ir_assignments.py, so edits here do not trigger a run." /></p>
         {/if}
         <div bind:this={editorHostEl} class="script-editor" aria-label={readOnlyFile ? `${selectedFile} (generated, read-only)` : `${selectedFile} Python editor`}></div>
       </div>

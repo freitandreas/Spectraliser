@@ -44,56 +44,14 @@ export class WorkerClient {
     return this.enqueueRequest({ type: 'execute_batch', requestId: createId('exec_batch'), ...input })
   }
 
-  async detectPeaks(input: {
-    spectrumId: string
-    abscissa: number[]
-    ordinate: number[]
-    prominence: number
-    minDistance: number
-    minHeight: number | null
-    mode: 'maxima' | 'minima'
-  }): Promise<WorkerResponse> {
+  async detectPeaks(input: Omit<Extract<WorkerRequest, { type: 'detect_peaks' }>, 'type' | 'requestId'>): Promise<WorkerResponse> {
     await this.init()
-
-    const request: WorkerRequest = {
-      type: 'detect_peaks',
-      requestId: createId('detect_peaks'),
-      spectrumId: input.spectrumId,
-      abscissa: input.abscissa,
-      ordinate: input.ordinate,
-      prominence: input.prominence,
-      minDistance: input.minDistance,
-      minHeight: input.minHeight,
-      mode: input.mode,
-    }
-
-    return this.enqueueRequest(request)
+    return this.enqueueRequest({ type: 'detect_peaks', requestId: createId('detect_peaks'), ...input })
   }
 
-  async computePeakHeatmap(input: {
-    spectrumId: string
-    abscissa: number[]
-    ordinate: number[]
-    prominenceValues: number[]
-    distanceValues: number[]
-    minHeight: number | null
-    mode: 'maxima' | 'minima'
-  }): Promise<WorkerResponse> {
+  async suggestSmoothing(input: { spectrumId: string; ordinate: number[] }): Promise<WorkerResponse> {
     await this.init()
-
-    const request: WorkerRequest = {
-      type: 'peak_heatmap',
-      requestId: createId('peak_heatmap'),
-      spectrumId: input.spectrumId,
-      abscissa: input.abscissa,
-      ordinate: input.ordinate,
-      prominenceValues: input.prominenceValues,
-      distanceValues: input.distanceValues,
-      minHeight: input.minHeight,
-      mode: input.mode,
-    }
-
-    return this.enqueueRequest(request)
+    return this.enqueueRequest({ type: 'suggest_smoothing', requestId: createId('suggest_smoothing'), ...input })
   }
 
   private enqueueRequest(request: WorkerRequest): Promise<WorkerResponse> {

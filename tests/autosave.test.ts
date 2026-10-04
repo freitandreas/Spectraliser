@@ -17,6 +17,7 @@ vi.mock('idb', () => {
 
 import { loadAutosave, saveAutosave } from '../src/services/persistence/autosave'
 import type { AppState } from '../src/types/project'
+import { buildDataset } from './fixtures'
 
 describe('autosave', () => {
   it('saves and restores app state', async () => {
@@ -25,7 +26,7 @@ describe('autosave', () => {
       projectName: 'Test',
       createdAt: '2026-01-01T00:00:00.000Z',
       updatedAt: '2026-01-01T00:00:00.000Z',
-      datasets: [],
+      datasets: [buildDataset({ experimentMetadata: { temperature: '25', operator: null } })],
       viewState: {
         zoomRangeX: null,
         zoomRangeY: null,
@@ -36,8 +37,6 @@ describe('autosave', () => {
       syncMode: 'gui_synchronized',
       generatedScript: '',
       userScriptOverride: null,
-      workerBusy: false,
-      workerLastError: null,
       autosaveEnabled: true,
     } satisfies AppState
 

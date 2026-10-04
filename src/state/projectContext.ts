@@ -1,6 +1,7 @@
 import { get, writable } from 'svelte/store'
 import {
   APP_SCHEMA_VERSION,
+  DEFAULT_PEAK_DETECTION,
   DEFAULT_STYLE,
   getSpectrumStyleDefaults,
   type AppState,
@@ -13,6 +14,8 @@ import { axisDefaultsFor } from '../services/spectrumPresets'
 import { buildPipeline } from './pipelineBlueprint'
 import { migrateProjectState } from './migrations'
 import { deriveGeneralSettings } from '../services/generalSettings'
+import { transitionSyncState } from '../services/script/syncStateMachine'
+import { patchRuntime } from './runtimeState'
 import type { ParsedSpectrum } from '../services/import/parsers'
 
 export { buildPipeline }
@@ -50,7 +53,8 @@ function buildInitialDataset(): SpectrumDataset {
       label: 'Sample 01 (Processed)',
     },
     peaks: [],
-    peakDetection: { prominence: 0.01, minDistance: 1, minHeight: null, mode: 'maxima' },
+    experimentMetadata: {},
+    peakDetection: { ...DEFAULT_PEAK_DETECTION },
   }
 }
 
@@ -75,10 +79,6 @@ function buildInitialState(): AppState {
     generatedScript: generatePythonScript(datasets),
     userScriptOverride: null,
     pythonFileOverrides: {},
-    workerBusy: false,
-    workerLastError: null,
-    scriptOutput: [],
-    scriptProgress: { active: false, completed: 0, total: 0, message: '' },
     autosaveEnabled: true,
   }
 }
@@ -124,7 +124,8 @@ export function createDatasetFromParsed(input: {
           : `${input.name} (Processed)`),
     },
     peaks: [],
-    peakDetection: { prominence: 0.01, minDistance: 1, minHeight: null, mode: 'maxima' },
+    experimentMetadata: {},
+    peakDetection: { ...DEFAULT_PEAK_DETECTION },
   }
 }
 
@@ -164,100 +165,81 @@ export const appState = writable<AppState>(buildInitialState())
 
 export const workerClient = createWorkerClient()
 let autosaveTimer: number | null = null
-let lastGeneratedScriptSignature = ''
-
-export function logScriptDebug(event: string, details: Record<string, unknown>): void {
-  console.debug(`[script-debug] ${event}`, details)
-}
-
-export function appendScriptOutput(message: string): void {
-  appState.update((state) => ({
-    ...state,
-    scriptOutput: [...state.scriptOutput, `[${new Date().toLocaleTimeString()}] ${message}`].slice(-300),
-  }))
-}
 
 workerClient.init().catch((error: unknown) => {
-  appState.update((state) => ({
-    ...state,
-    workerLastError: error instanceof Error ? error.message : 'Failed to initialize Pyodide worker',
-  }))
+  patchRuntime({ workerLastError: error instanceof Error ? error.message : 'Failed to initialize Pyodide worker' })
 })
 
 void loadAutosave().then((saved) => {
-  if (!saved) {
-    return
-  }
-
+  if (!saved) return
   const migrated = migrateProjectState(saved)
-  const nextState = migrated.scriptSyncEnabled
+  appState.set(migrated.scriptSyncEnabled
     ? { ...migrated, generatedScript: generatePythonScript(migrated.datasets) }
-    : migrated
-
-  appState.set(nextState)
-  logScriptDebug('autosave_loaded', {
-    datasetCount: nextState.datasets.length,
-    syncMode: nextState.syncMode,
-    scriptSyncEnabled: nextState.scriptSyncEnabled,
-    userOverrideActive: nextState.userScriptOverride !== null,
-    regeneratedApplied: nextState.scriptSyncEnabled,
-  })
+    : migrated)
 })
 
-export function scheduleAutosave(nextState: AppState): void {
-  if (!nextState.autosaveEnabled) {
-    return
-  }
-
-  if (autosaveTimer !== null) {
-    window.clearTimeout(autosaveTimer)
-  }
-
+/** Debounced; the state is read when the timer fires, so the latest project is always the one saved. */
+export function scheduleAutosave(): void {
+  if (autosaveTimer !== null) window.clearTimeout(autosaveTimer)
   autosaveTimer = window.setTimeout(() => {
-    void saveAutosave(nextState)
+    autosaveTimer = null
+    const state = get(appState)
+    if (state.autosaveEnabled) void saveAutosave(state)
   }, 350)
 }
 
-export function regenerateScript(datasets: SpectrumDataset[]): string {
-  const script = generatePythonScript(datasets)
-  const signature = [
-    datasets.length,
-    datasets[0]?.style.label ?? '',
-    script.length,
-    script.slice(0, 200),
-  ].join('|')
-
-  if (signature !== lastGeneratedScriptSignature) {
-    lastGeneratedScriptSignature = signature
-    logScriptDebug('generated_script', {
-      datasetCount: datasets.length,
-      firstDataset: datasets[0]?.style.label ?? null,
-      loadsSamplesJson: script.includes('samples.json'),
-    })
-  }
-
-  return script
+/** Stamps a changed project and schedules its autosave. */
+export function persist(state: AppState): AppState {
+  scheduleAutosave()
+  return { ...state, updatedAt: new Date().toISOString() }
 }
 
-export function commitDatasets(
-  state: AppState,
-  datasets: SpectrumDataset[],
-): AppState {
-  if (!state.scriptSyncEnabled) {
-    logScriptDebug('skip_regenerate_sync_disabled', {
-      datasetCount: datasets.length,
-      syncMode: state.syncMode,
-      userOverrideActive: state.userScriptOverride !== null,
-    })
-  }
+/** Applies a project mutation; returning the input state unchanged skips stamping and saving. */
+export function updateProject(mutate: (state: AppState) => AppState): void {
+  appState.update((state) => {
+    const next = mutate(state)
+    return next === state ? state : persist(next)
+  })
+}
 
-  const nextState = {
+export function mapDataset(
+  datasets: SpectrumDataset[],
+  datasetId: string,
+  mutate: (dataset: SpectrumDataset) => SpectrumDataset,
+): SpectrumDataset[] {
+  let changed = false
+  const next = datasets.map((dataset) => {
+    if (dataset.id !== datasetId) return dataset
+    const updated = mutate(dataset)
+    changed ||= updated !== dataset
+    return updated
+  })
+  return changed ? next : datasets
+}
+
+/** Changes one sample without touching the generated script (peaks, detection settings, labels). */
+export function updateDataset(datasetId: string, mutate: (dataset: SpectrumDataset) => SpectrumDataset): void {
+  updateProject((state) => {
+    const datasets = mapDataset(state.datasets, datasetId, mutate)
+    return datasets === state.datasets ? state : { ...state, datasets }
+  })
+}
+
+export function regenerateScript(datasets: SpectrumDataset[]): string {
+  return generatePythonScript(datasets)
+}
+
+/** Replaces the datasets and regenerates the script while it is synchronised with the GUI. */
+export function commitDatasets(state: AppState, datasets: SpectrumDataset[]): AppState {
+  return persist({
     ...state,
     datasets,
     generatedScript: state.scriptSyncEnabled ? regenerateScript(datasets) : state.generatedScript,
-    updatedAt: new Date().toISOString(),
-  }
+  })
+}
 
-  scheduleAutosave(nextState)
-  return nextState
+/** A GUI edit that may desynchronise a manually edited script (see the sync state machine). */
+export function commitGuiEdit(state: AppState, datasets: SpectrumDataset[]): AppState {
+  const sync = transitionSyncState({ mode: state.syncMode, scriptSyncEnabled: state.scriptSyncEnabled }, { type: 'GUI_EDIT' })
+  return commitDatasets({ ...state, syncMode: sync.mode, scriptSyncEnabled: sync.scriptSyncEnabled }, datasets)
 }

@@ -1,8 +1,9 @@
 <script lang="ts">
+  import type { SpectrumDataset } from '../../types/project'
   import type { SampleSubView } from './workbenchUtils'
 
   export let open: boolean
-  export let datasets: any[]
+  export let datasets: SpectrumDataset[]
   export let expandedSampleId: string | null
   export let selectedDatasetId: string | null
   export let onClose: () => void

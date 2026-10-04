@@ -30,4 +30,12 @@ describe('axisLabel targets', () => {
     expect(axisLabel('Wavelength', 'nm', 'slash', 'symbol', 'plotly')).toBe('<i>λ</i> / nm')
     expect(axisLabel('Absorbance', '', 'fraction', 'symbol', 'plotly')).toBe('<i>A</i>')
   })
+
+  it('adds a single upright "norm" subscript in every target', () => {
+    expect(axisLabel('Absorbance', '%', 'slash', 'symbol', 'plotly', 'norm')).toBe('<i>A</i><sub>norm</sub> / %')
+    expect(axisLabel('Absorbance', '%', 'slash', 'name', 'plotly', 'norm')).toBe('Absorbance<sub>norm</sub> / %')
+    expect(axisLabel('Absorbance', '%', 'fraction', 'symbol', 'plotly', 'norm')).toBe('$\\frac{A_{\\mathrm{norm}}}{\\mathrm{\\%}}$')
+    expect(axisLabel('Absorbance', '', 'slash', 'symbol', 'plain', 'norm')).toBe('A_norm')
+    expect(quantityHtml('Normalised intensity', 'symbol', 'modified,norm')).toBe('<i>I</i><sub>norm,modified</sub>')
+  })
 })

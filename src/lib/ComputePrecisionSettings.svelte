@@ -1,4 +1,5 @@
 <script lang="ts">
+  import HelpTip from './HelpTip.svelte'
   import type { ComputePrecision } from '../services/startupPreferences'
 
   export let precision: ComputePrecision
@@ -19,7 +20,7 @@
 </script>
 
 <fieldset class="precision-settings">
-  <legend>Python computation precision</legend>
+  <legend>Python computation precision <HelpTip label="Computation precision" text="Imported measurements are always stored unchanged; this only sets the arrays handed to the processing script. Changing it re-runs the script once for all visible samples." /></legend>
   {#each options as option (option.id)}
     <label class="precision-option" class:chosen={precision === option.id}>
       <input
@@ -31,14 +32,10 @@
       />
       <span>
         <strong>{option.title}</strong>
-        <small>{option.detail}</small>
+        <HelpTip label={option.title} text={option.detail} />
       </span>
     </label>
   {/each}
-  <p class="precision-note">
-    Imported measurements are always stored unchanged; this only sets the arrays handed to the processing script.
-    Changing it re-runs the script once for all visible samples.
-  </p>
 </fieldset>
 
 <style>
@@ -69,15 +66,10 @@
     border-color: var(--accent, #4fc1ff);
   }
 
-  .precision-option span {
-    display: grid;
-    gap: 2px;
-  }
-
-  .precision-option small,
-  .precision-note {
-    color: var(--text-dim, #9aa0aa);
-    font-size: .78rem;
-    margin: 0;
+  .precision-option span,
+  legend {
+    display: flex;
+    align-items: center;
+    gap: 6px;
   }
 </style>

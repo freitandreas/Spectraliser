@@ -1,4 +1,4 @@
-import { isPercentUnit, percentScaleFactor } from './spectrumPresets'
+import { isPercentUnit, ordinateUnitFactor } from './spectrumPresets'
 
 export type OrdinateMap = (value: number) => number
 
@@ -14,7 +14,8 @@ export function isAbsorbanceTransmittancePair(fromQuantity: string, toQuantity: 
 /**
  * Value mapping for an ordinate metadata change, or null when the values stay untouched.
  * Absorbance and transmittance are related by A = −log₁₀(T) with T as a fraction; percent
- * transmittance is scaled first. Same-quantity changes only rescale percent units.
+ * transmittance is scaled first. Same-quantity changes only rescale percent units and
+ * throw for units without a common scale.
  */
 export function ordinateConversion(fromQuantity: string, fromUnit: string, toQuantity: string, toUnit: string): OrdinateMap | null {
   if (isAbsorbanceTransmittancePair(fromQuantity, toQuantity)) {
@@ -32,7 +33,7 @@ export function ordinateConversion(fromQuantity: string, fromUnit: string, toQua
       return 10 ** -value * scale
     }
   }
-  const scale = percentScaleFactor(fromUnit, toUnit)
+  const scale = ordinateUnitFactor(fromUnit, toUnit)
   return scale === null ? null : (value) => value * scale
 }
 

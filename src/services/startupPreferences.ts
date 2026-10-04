@@ -9,7 +9,7 @@ import {
   BLANK_UNIT,
   type AxisLabelFormat,
 } from './spectrumPresets'
-import { SERIES_TIME_UNITS, type SeriesTimeUnit } from './seriesCoordinates'
+import { defaultUnitForKind, fieldKind, isSupportedSeriesUnit } from './metadataFields'
 
 export type { AxisLabelFormat } from './spectrumPresets'
 export type PlotStyleTemplate = 'grid' | 'minimal' | 'framed'
@@ -34,7 +34,10 @@ export interface PlotStylePreferences {
   axisLabelFormat: AxisLabelFormat
   /** Show quantities by IUPAC symbol (λ, A) or by full name in plots and tables. */
   quantityNotation: QuantityNotation
-  seriesUnit: SeriesTimeUnit
+  /** Third axis of heatmap and 3D views: `time`, `concentration` or a custom metadata field name. */
+  seriesField: string
+  /** Target unit of the third axis (time or concentration); custom fields keep their own unit. */
+  seriesUnit: string
   seriesInterpolation: SeriesInterpolationPreferences
 }
 
@@ -83,6 +86,7 @@ export function preferencesForTemplate(template: PlotStyleTemplate): PlotStylePr
     plotMode: 'overlay',
     axisLabelFormat: 'slash',
     quantityNotation: 'name',
+    seriesField: 'time',
     seriesUnit: 's',
     seriesInterpolation: { enabled: false, steps: 1 },
   }
@@ -96,6 +100,7 @@ function normalizePlotStyle(value: unknown): PlotStylePreferences {
   const raw = value && typeof value === 'object' ? value as Partial<PlotStylePreferences> : {}
   const template: PlotStyleTemplate = raw.template === 'minimal' || raw.template === 'framed' ? raw.template : 'grid'
   const defaults = preferencesForTemplate(template)
+  const seriesField = typeof raw.seriesField === 'string' && raw.seriesField.trim() ? raw.seriesField.trim() : 'time'
   const rawInterpolation = raw.seriesInterpolation && typeof raw.seriesInterpolation === 'object'
     ? raw.seriesInterpolation as Partial<SeriesInterpolationPreferences>
     : {}
@@ -110,7 +115,10 @@ function normalizePlotStyle(value: unknown): PlotStylePreferences {
     plotMode: raw.plotMode === 'heatmap' || raw.plotMode === 'surface3d' ? raw.plotMode : 'overlay',
     axisLabelFormat: raw.axisLabelFormat === 'fraction' || raw.axisLabelFormat === 'in' ? raw.axisLabelFormat : 'slash',
     quantityNotation: raw.quantityNotation === 'symbol' ? 'symbol' : 'name',
-    seriesUnit: SERIES_TIME_UNITS.includes(raw.seriesUnit as SeriesTimeUnit) ? raw.seriesUnit as SeriesTimeUnit : 's',
+    seriesField,
+    seriesUnit: fieldKind(seriesField) === 'custom'
+      ? ''
+      : isSupportedSeriesUnit(seriesField, raw.seriesUnit ?? '') ? raw.seriesUnit! : defaultUnitForKind(fieldKind(seriesField)),
     seriesInterpolation: {
       enabled: rawInterpolation.enabled === true,
       steps: typeof rawInterpolation.steps === 'number' && Number.isFinite(rawInterpolation.steps)
@@ -163,7 +171,12 @@ export function loadStartupPreferences(): StartupPreferences {
 
 export function saveStartupPreferences(preferences: StartupPreferences): void {
   if (typeof localStorage === 'undefined') return
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizeStartupPreferences(preferences)))
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizeStartupPreferences(preferences)))
+  } catch (error) {
+    // Blocked or full storage: the preferences still apply for this session.
+    console.warn('Startup preferences could not be saved:', error)
+  }
 }
 
 export function hasCompletedStartupWizard(): boolean {

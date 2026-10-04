@@ -1,3 +1,4 @@
+import { finiteRange } from '../numeric'
 import { projectStore } from '../../state/projectStore'
 import { generateSelfContainedHtmlReport } from './htmlReport'
 import { createPythonProjectArchive } from './pythonProject'
@@ -10,12 +11,8 @@ function sanitizeFilename(value: string): string {
 
 function buildCsvReport(state: ReturnType<typeof projectStore.snapshot>): string {
   const rows = state.datasets.map((dataset) => {
-    const abscissaValues = dataset.data.abscissa
-    const ordinateValues = dataset.data.ordinateModified.filter(Number.isFinite)
-    const minX = abscissaValues.length ? Math.min(...abscissaValues) : ''
-    const maxX = abscissaValues.length ? Math.max(...abscissaValues) : ''
-    const minY = ordinateValues.length ? Math.min(...ordinateValues) : ''
-    const maxY = ordinateValues.length ? Math.max(...ordinateValues) : ''
+    const [minX, maxX] = finiteRange(dataset.data.abscissa) ?? ['', '']
+    const [minY, maxY] = finiteRange(dataset.data.ordinateModified) ?? ['', '']
 
     return [
       dataset.name,
@@ -23,7 +20,7 @@ function buildCsvReport(state: ReturnType<typeof projectStore.snapshot>): string
       dataset.spectrumType,
       dataset.units.x,
       dataset.units.y,
-      String(abscissaValues.length),
+      String(dataset.data.abscissa.length),
       String(minX),
       String(maxX),
       String(minY),

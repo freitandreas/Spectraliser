@@ -8,11 +8,12 @@ describe('scriptExecutionKey', () => {
   it('ignores display metadata and samples.json', () => {
     const base = buildDataset()
     const key = scriptExecutionKey(base, files, 'float32')
-    const restyled = buildDataset({
+    const restyled = {
+      ...base,
       name: 'renamed.csv',
       style: { ...base.style, label: 'Other', lineColor: '#000000', lineWidth: 4, visible: false },
-      peaks: [{ id: 'p', index: 0, x: 200, y: 0.1, label: 'manual', source: 'manual', enabled: true }],
-    })
+      peaks: [{ id: 'p', index: 0, x: 200, y: 0.1, label: 'manual', source: 'manual' as const, enabled: true }],
+    }
     expect(scriptExecutionKey(restyled, { ...files, 'samples.json': '[{"label":"Other"}]' }, 'float32')).toBe(key)
   })
 
@@ -22,11 +23,11 @@ describe('scriptExecutionKey', () => {
     const variants = [
       scriptExecutionKey(base, files, 'float64'),
       scriptExecutionKey(base, { ...files, 'processing.py': 'x = 2' }, 'float32'),
-      scriptExecutionKey(buildDataset({ units: { x: 'cm⁻¹', y: 'Absorbance' } }), files, 'float32'),
-      scriptExecutionKey(buildDataset({ pipeline: [] }), files, 'float32'),
-      scriptExecutionKey(buildDataset({ peakDetection: { prominence: 0.2, minDistance: 1, minHeight: null, mode: 'maxima' } }), files, 'float32'),
-      scriptExecutionKey(buildDataset({ data: { ...base.data, ordinateOriginal: [0.1, 0.3] } }), files, 'float32'),
-      scriptExecutionKey(buildDataset({ spectrumType: 'ir' }), files, 'float32'),
+      scriptExecutionKey({ ...base, units: { ...base.units, x: 'cm⁻¹', y: 'Absorbance' } }, files, 'float32'),
+      scriptExecutionKey({ ...base, pipeline: [] }, files, 'float32'),
+      scriptExecutionKey({ ...base, peakDetection: { prominence: 0.2, minDistance: 1, minHeight: null, mode: 'maxima' } }, files, 'float32'),
+      scriptExecutionKey({ ...base, data: { ...base.data, ordinateOriginal: [...base.data.ordinateOriginal] } }, files, 'float32'),
+      scriptExecutionKey({ ...base, spectrumType: 'ir' }, files, 'float32'),
     ]
     for (const variant of variants) expect(variant).not.toBe(key)
     expect(new Set(variants).size).toBe(variants.length)

@@ -3,18 +3,20 @@ import type { AppState } from '../types/project'
 import { appState } from './projectContext'
 import { rerunPipeline, updateTransform } from './pipelineActions'
 import { executeScriptForDatasets, setScriptOverride, setPythonFileOverride, revertScriptToGuiState, confirmOverwriteForGuiEdits } from './scriptActions'
-import { updateDatasetMetadata, convertDatasetAbscissa, updateStyle, importDataset, importDatasets, selectDataset, setActiveTab, removeDataset } from './datasetActions'
-import { detectPeaks, computePeakHeatmap, addPeakAtIndex, setPeakEnabled, removePeak, clearPeaks, updatePeakLabel, setPeakDetectionMode, updatePeakDetectionSettings } from './peakActions'
+import { updateDatasetMetadata, updateStyle, importDatasets, selectDataset, setActiveTab, removeDataset, linkExperimentMetadata } from './datasetActions'
+import { adviseSmoothing } from './autoParameterActions'
+import { detectPeaks, addPeakAtIndex, setPeakEnabled, removePeak, clearPeaks, updatePeakLabel, setPeakDetectionMode, updatePeakDetectionSettings } from './peakActions'
 
 function snapshot(): AppState { return get(appState) }
 
 export const projectStore = {
   subscribe: appState.subscribe,
-  rerunPipeline, executeScriptForDatasets, updateDatasetMetadata, convertDatasetAbscissa, updateStyle,
+  rerunPipeline, executeScriptForDatasets, updateDatasetMetadata, updateStyle,
   updateTransform, setScriptOverride, setPythonFileOverride, revertScriptToGuiState,
-  confirmOverwriteForGuiEdits, importDataset, importDatasets, selectDataset,
-  setActiveTab, removeDataset, detectPeaks, computePeakHeatmap, addPeakAtIndex,
-  setPeakEnabled, removePeak, clearPeaks, updatePeakLabel, setPeakDetectionMode, updatePeakDetectionSettings, snapshot,
+  confirmOverwriteForGuiEdits, importDatasets, selectDataset,
+  setActiveTab, removeDataset, linkExperimentMetadata, detectPeaks, addPeakAtIndex,
+  setPeakEnabled, removePeak, clearPeaks, updatePeakLabel, setPeakDetectionMode, updatePeakDetectionSettings,
+  adviseSmoothing, snapshot,
 }
 
 export const activeDataset = derived(appState, state =>

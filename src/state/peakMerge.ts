@@ -35,7 +35,6 @@ export function mergeAssignedPeaks(existing: Peak[], assigned: AssignedPeak[]): 
       labelEdited: previous?.labelEdited ?? false,
       source: previous?.source ?? 'auto',
       enabled: previous?.enabled ?? true,
-      dataOrigin: 'processed',
       intensity: peak.intensity,
       confidence: peak.confidence,
       alternatives: peak.alternatives,

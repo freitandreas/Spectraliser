@@ -49,28 +49,7 @@ export function isSeriesTimeUnit(value: unknown): value is SeriesTimeUnit {
   return SERIES_TIME_UNITS.includes(value as SeriesTimeUnit)
 }
 
-export interface CoordinateSource {
-  label: string
-  seriesCoordinate?: SeriesCoordinate | null
-}
-
-export type ResolvedSeriesCoordinates =
-  | { kind: 'time'; values: number[]; unit: SeriesTimeUnit }
-  | { kind: 'index'; values: number[]; missing: string[]; duplicates: boolean }
-
-/** Manual coordinates take precedence over values parsed from labels. */
-export function resolveSeriesCoordinates(
-  sources: CoordinateSource[],
-  targetUnit: SeriesTimeUnit,
-): ResolvedSeriesCoordinates {
-  const coordinates = sources.map((source) => source.seriesCoordinate ?? parseSeriesCoordinate(source.label))
-  const missing = sources.filter((_, index) => coordinates[index] === null).map((source) => source.label)
-  const values = coordinates.map((coordinate) =>
-    coordinate ? convertSeriesCoordinate(coordinate.value, coordinate.unit, targetUnit) : Number.NaN,
-  )
-  const duplicates = new Set(values.filter((value) => Number.isFinite(value))).size
-    !== values.filter((value) => Number.isFinite(value)).length
-
-  if (missing.length === 0 && !duplicates) return { kind: 'time', values, unit: targetUnit }
-  return { kind: 'index', values: sources.map((_, index) => index + 1), missing, duplicates }
+/** Maps spellings such as `sec`, `minutes` or `us` to a supported time unit; unknown text returns null. */
+export function normaliseTimeUnit(raw: string): SeriesTimeUnit | null {
+  return UNIT_ALIASES[raw.trim()] ?? UNIT_ALIASES[raw.trim().toLowerCase()] ?? null
 }

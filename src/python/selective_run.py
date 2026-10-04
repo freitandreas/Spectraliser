@@ -79,7 +79,8 @@ def run_sample(sample, process_spectrum, assign_ir_peaks):
             peak = dict(peak)
             peak['index'] = int(positions[int(peak['index'])])
             peaks.append(peak)
-    return {'ordinate_modified': modified.tolist(), 'peaks': peaks}
+    # An ndarray crosses into JavaScript as one Float64Array copy instead of a list of Python floats.
+    return {'ordinate_modified': modified, 'peaks': peaks}
 
 
 def run_samples(sample_ids, samples, process_spectrum, assign_ir_peaks):
