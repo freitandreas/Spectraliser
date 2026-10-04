@@ -1,79 +1,125 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { createEventDispatcher, onMount } from 'svelte'
   import Plotly from 'plotly.js-dist-min'
   import type { SpectrumDataset } from '../types/project'
-  import { axisLabel, isPercentUnit } from '../services/spectrumPresets'
-  import { buildLineTraces, buildPeakAnnotations, buildPeakTrace, type PlotTrace } from './plot/plotTraces'
-  import { AxisRangeTween } from './plot/zoomTween'
+  import type { PlotStylePreferences } from '../services/startupPreferences'
+  import { buildPlotFigure, type PlotFigure } from './plot/plotFigure'
+  import { ensureMathJax } from './plot/mathJax'
+  import { pointKey, resolveGridPoint, type DatasetPoint } from './plot/plotLinks'
+  import { highlightShapes, sceneSlotRestyle, sceneSlots, type HighlightState } from './plot/highlightLayer'
+  import { createPeakZoom } from './plot/peakZoom'
 
   export let datasets: SpectrumDataset[] = []
   export let selectedSpectrumId: string | null = null
-  export let hoverSelection: { datasetId: string; pointIndex: number } | null = null
+  export let hoverSelection: DatasetPoint | null = null
   export let peakPickingEnabled = false
   export let peakHoverSelection: { datasetId: string; peakId: string } | null = null
   export let peakZoomPeakId: string | null = null
   export let highlightedDatasetId: string | null = null
-
-  import { createEventDispatcher } from 'svelte'
+  export let plotStyle: PlotStylePreferences
 
   const dispatch = createEventDispatcher<{
-    hoverpoint: { datasetId: string; pointIndex: number } | null
-    peakpick: { datasetId: string; pointIndex: number }
+    hoverpoint: DatasetPoint | null
+    peakpick: DatasetPoint
     peakhover: { datasetId: string; peakId: string } | null
   }>()
 
-  let container: HTMLDivElement | null = null
-  let lastDatasetsRef: SpectrumDataset[] | null = null
-  let lastSelectedSpectrumId: string | null = null
-  let lastHoverKey = ''
-  let resizeObserver: ResizeObserver | null = null
-
-  type PlotlyTracePoint = {
-    curveNumber?: number
-    pointNumber?: number
-  }
-
+  type PlotlyPoint = { curveNumber?: number; pointNumber?: number | number[]; x?: unknown; y?: unknown }
   type PlotlyGraphDiv = HTMLDivElement & {
-    on?: (eventName: string, handler: (eventData: { points?: PlotlyTracePoint[] }) => void) => void
+    on?: (eventName: string, handler: (eventData: { points?: PlotlyPoint[] }) => void) => void
     removeAllListeners?: (eventName?: string) => void
+    _fullLayout?: unknown
   }
+  type PlotlyApi = typeof Plotly & {
+    Fx?: { hover: (target: HTMLDivElement, points: Array<{ curveNumber: number; pointNumber: number }>) => void; unhover: (target: HTMLDivElement) => void }
+    restyle?: (target: HTMLDivElement, update: Record<string, unknown>, indices: number[]) => Promise<unknown>
+    relayout?: (target: HTMLDivElement, update: Record<string, unknown>) => Promise<unknown>
+    purge?: (target: HTMLDivElement) => void
+    Plots?: { resize: (target: HTMLDivElement) => void }
+  }
+  const plotly = Plotly as PlotlyApi
 
-  let hoverHandlerAttached = false
-  let preZoomRange: { x: [number, number] | null; y: [number, number] | null } | null = null
+  let container: HTMLDivElement | null = null
+  let plotReady = false
+  let renderKey = ''
+  let resizeObserver: ResizeObserver | null = null
+  let notices: string[] = []
+  let renderedMode: PlotFigure['mode'] = 'overlay'
+  let links: PlotFigure['links'] = { seriesTraces: [], peakTrace: null, grid: null }
+  let highlight: PlotFigure['highlight'] | null = null
+  let renderGeneration = 0
+  let handlersAttached = false
   let lastAppliedPeakZoomId: string | null | undefined = undefined
-  let lastHighlightedDatasetId: string | null = null
-  let zoomGeneration = 0
-  const zoomTween = new AxisRangeTween()
 
-  function getPeaksDataset(): SpectrumDataset | null {
-    return datasets.find((dataset) => dataset.id === selectedSpectrumId) ?? null
+  // Keys of the highlight state currently drawn, so unchanged parts are never re-applied.
+  let applied = { series: '', peak: '', hover: '' }
+  let highlightFrame: number | null = null
+  // Last values sent to the parent; echoes of the plot's own hover are not drawn again.
+  let dispatchedHoverKey = 'none'
+  let dispatchedPeakKey = 'none'
+
+  /** Plotly drops `_fullLayout` when a div is purged or not yet drawn; relayout/restyle would then throw. */
+  function plotAlive(): boolean {
+    return Boolean(container && plotReady && (container as PlotlyGraphDiv)._fullLayout)
   }
 
-  function buildTraces(): PlotTrace[] {
-    const traces = buildLineTraces(datasets, selectedSpectrumId, highlightedDatasetId)
-
-    const peaksDataset = getPeaksDataset()
-    if (peaksDataset) {
-      const hoveredId = peakHoverSelection?.datasetId === peaksDataset.id ? peakHoverSelection.peakId : null
-      traces.push(buildPeakTrace(peaksDataset, peaksDataset.peaks, hoveredId))
+  function safe(call: () => Promise<unknown> | undefined): void {
+    if (!plotAlive()) return
+    try {
+      void call()?.catch(() => undefined)
+    } catch {
+      // A purge between scheduling and drawing makes the update obsolete.
     }
-
-    return traces
   }
 
-  function traceDatasetId(curveNumber: number | undefined): string | null {
-    if (curveNumber === undefined) {
-      return null
-    }
+  const peakZoom = createPeakZoom({
+    container: () => container,
+    alive: plotAlive,
+    relayout: (update) => safe(() => plotly.relayout?.(container!, update)),
+    datasets: () => datasets,
+    peaksDataset: () => datasets.find((dataset) => dataset.id === selectedSpectrumId) ?? null,
+    mode: () => renderedMode,
+  })
 
-    return datasets[curveNumber]?.id ?? null
+  function highlightState(): HighlightState {
+    const peaksId = highlight?.peaksDatasetId ?? null
+    const hoverKey = pointKey(hoverSelection)
+    return {
+      highlightedDatasetId,
+      hoveredPeakId: peakHoverSelection && peakHoverSelection.datasetId === peaksId ? peakHoverSelection.peakId : null,
+      hoverPoint: hoverKey === dispatchedHoverKey ? null : hoverSelection,
+    }
   }
 
-  function attachHoverHandlers(): void {
-    if (!container || hoverHandlerAttached) {
-      return
-    }
+  function stateKeys(state: HighlightState): typeof applied {
+    return { series: state.highlightedDatasetId ?? '', peak: state.hoveredPeakId ?? '', hover: pointKey(state.hoverPoint) }
+  }
 
+  function resolvePoint(point: PlotlyPoint): DatasetPoint | null {
+    if (point.curveNumber === undefined) return null
+    if (links.grid && point.curveNumber === links.grid.traceIndex) {
+      return resolveGridPoint(links.grid, datasets, point.x as number, point.y as number)
+    }
+    const link = links.seriesTraces.find((item) => item.traceIndex === point.curveNumber)
+    return link && typeof point.pointNumber === 'number' ? { datasetId: link.datasetId, pointIndex: point.pointNumber } : null
+  }
+
+  function sendHover(target: DatasetPoint | null): void {
+    const key = pointKey(target)
+    if (key === dispatchedHoverKey) return
+    dispatchedHoverKey = key
+    dispatch('hoverpoint', target)
+  }
+
+  function sendPeakHover(target: { datasetId: string; peakId: string } | null): void {
+    const key = target ? `${target.datasetId}:${target.peakId}` : 'none'
+    if (key === dispatchedPeakKey) return
+    dispatchedPeakKey = key
+    dispatch('peakhover', target)
+  }
+
+  function attachHandlers(): void {
+    if (!container || handlersAttached) return
     const graph = container as PlotlyGraphDiv
     graph.removeAllListeners?.('plotly_hover')
     graph.removeAllListeners?.('plotly_unhover')
@@ -81,347 +127,237 @@
 
     graph.on?.('plotly_hover', (eventData) => {
       const point = eventData.points?.[0]
-      if (point?.curveNumber === undefined) {
+      if (point?.curveNumber === undefined) return
+      const peakTrace = links.peakTrace
+      if (peakTrace && point.curveNumber === peakTrace.traceIndex) {
+        const peakId = typeof point.pointNumber === 'number' ? peakTrace.peakIds[point.pointNumber] : undefined
+        if (peakId) sendPeakHover({ datasetId: peakTrace.datasetId, peakId })
         return
       }
-
-      const peaksDataset = getPeaksDataset()
-      if (peaksDataset) {
-        const enabledTraceIndex = datasets.length
-        if (point.curveNumber === enabledTraceIndex) {
-          const peaks = peaksDataset.peaks
-          const peak = point.pointNumber !== undefined ? peaks[point.pointNumber] : undefined
-          if (peak) {
-            dispatch('peakhover', { datasetId: peaksDataset.id, peakId: peak.id })
-          }
-          return
-        }
-      }
-
-      const datasetId = traceDatasetId(point.curveNumber)
-      const pointIndex = point.pointNumber
-      if (datasetId === null || pointIndex === undefined) {
-        return
-      }
-
-      dispatch('hoverpoint', { datasetId, pointIndex })
+      sendHover(resolvePoint(point))
     })
 
     graph.on?.('plotly_unhover', () => {
-      dispatch('hoverpoint', null)
-      dispatch('peakhover', null)
+      sendHover(null)
+      sendPeakHover(null)
     })
 
     graph.on?.('plotly_click', (eventData) => {
-      if (!peakPickingEnabled) {
-        return
-      }
-
+      if (!peakPickingEnabled) return
+      // Only measured points qualify; peak markers and interpolated grid rows are excluded.
       const point = eventData.points?.[0]
-      // Only main line traces (index < datasets.length) qualify; the peaks overlay trace is excluded.
-      if (point?.curveNumber === undefined || point.curveNumber >= datasets.length) {
-        return
-      }
-
-      const datasetId = traceDatasetId(point.curveNumber)
-      const pointIndex = point.pointNumber
-      if (datasetId === null || pointIndex === undefined) {
-        return
-      }
-
-      dispatch('peakpick', { datasetId, pointIndex })
+      const peakTrace = links.peakTrace
+      if (!point || (peakTrace && point.curveNumber === peakTrace.traceIndex)) return
+      const target = resolvePoint(point)
+      if (target) dispatch('peakpick', target)
     })
 
-    hoverHandlerAttached = true
+    handlersAttached = true
+  }
+
+  function buildFigure(style: PlotStylePreferences, state: HighlightState): PlotFigure {
+    return buildPlotFigure({
+      datasets,
+      plotStyle: style,
+      selectedSpectrumId,
+      highlightedDatasetId: state.highlightedDatasetId,
+      hoveredPeakId: peakHoverSelection?.peakId ?? null,
+      hoverPoint: state.hoverPoint,
+    })
   }
 
   async function renderPlot(): Promise<void> {
-    if (!container) {
+    if (!container) return
+    const generation = ++renderGeneration
+    plotReady = false
+    peakZoom.reset()
+    lastAppliedPeakZoomId = undefined
+
+    const state = highlightState()
+    let figure = buildFigure(plotStyle, state)
+    if (figure.usesMath) {
+      try {
+        await ensureMathJax()
+      } catch (error) {
+        figure = buildFigure({ ...plotStyle, axisLabelFormat: 'slash' }, state)
+        figure.notices.push(error instanceof Error ? error.message : 'Fraction labels are unavailable.')
+      }
+      if (generation !== renderGeneration) return
+    }
+
+    // WebGL scenes and 2D cartesian axes cannot be morphed into each other by Plotly.react.
+    if (figure.mode !== renderedMode && (figure.mode === 'surface3d' || renderedMode === 'surface3d')) {
+      plotly.purge?.(container)
+      handlersAttached = false
+    }
+    renderedMode = figure.mode
+    notices = figure.notices
+    links = figure.links
+    highlight = figure.highlight
+
+    await plotly.react(container, figure.traces, figure.layout, { displaylogo: false, responsive: true })
+    if (generation !== renderGeneration || !container) return
+
+    plotReady = true
+    // The figure already contains the highlight state it was built with.
+    applied = stateKeys(state)
+    attachHandlers()
+    if (renderedMode === 'overlay') {
+      applied.hover = ''
+      applyOverlayHover(state)
+    }
+    scheduleHighlights()
+  }
+
+  function applyOverlayHover(state: HighlightState): void {
+    const key = pointKey(state.hoverPoint)
+    if (key === applied.hover || !container) return
+    applied.hover = key
+    const point = state.hoverPoint
+    const link = point ? links.seriesTraces.find((item) => item.datasetId === point.datasetId) : undefined
+    if (point && link) plotly.Fx?.hover(container, [{ curveNumber: link.traceIndex, pointNumber: point.pointIndex }])
+    // A plot-originated hover already shows Plotly's own label, which unhover would remove.
+    else if (pointKey(hoverSelection) !== dispatchedHoverKey) plotly.Fx?.unhover(container)
+  }
+
+  function applyHighlights(): void {
+    if (!plotAlive() || !highlight || !container) return
+    const target = container
+    const context = highlight
+    const state = highlightState()
+    const keys = stateKeys(state)
+
+    if (renderedMode === 'surface3d') {
+      const order: Array<keyof typeof applied> = ['series', 'peak', 'hover']
+      const changed = order.flatMap((key, slot) => (keys[key] !== applied[key] ? [slot] : []))
+      applied = keys
+      if (changed.length === 0) return
+      const slots = sceneSlots(context, state)
+      const update = sceneSlotRestyle(changed.map((slot) => slots[slot]))
+      safe(() => plotly.restyle?.(target, update, changed.map((slot) => context.slotStart + slot)))
       return
     }
 
-    const plotly = Plotly as typeof Plotly & {
-      Fx?: {
-        hover: (target: HTMLDivElement, points: Array<{ curveNumber: number; pointNumber: number }>) => void
-        unhover: (target: HTMLDivElement) => void
-      }
-    }
-
-    const abscissaReversed = datasets.some((dataset) => dataset.style.abscissaInverted)
-    const ordinateReversed = datasets.some((dataset) => dataset.style.ordinateInverted)
-
-    await plotly.react(
-      container,
-      buildTraces(),
-      {
-        autosize: true,
-        uirevision: 'spectraliser-plot',
-        margin: { l: 56, r: 18, t: 16, b: 48 },
-        paper_bgcolor: '#141519',
-        plot_bgcolor: '#141519',
-        font: { color: '#d4d4d4', family: 'Segoe UI, sans-serif' },
-        xaxis: {
-          title: axisLabel(datasets[0]?.units.xQuantity ?? 'Abscissa', datasets[0]?.units.x ?? ''),
-          gridcolor: 'rgba(255,255,255,0.08)',
-          zerolinecolor: 'rgba(255,255,255,0.12)',
-          reversed: abscissaReversed,
+    if (renderedMode === 'overlay' && keys.series !== applied.series) {
+      safe(() => plotly.restyle?.(
+        target,
+        {
+          opacity: datasets.map((dataset) => (dataset.id === selectedSpectrumId || dataset.id === highlightedDatasetId ? 1 : 0.42)),
+          'line.width': datasets.map((dataset) => dataset.style.lineWidth + (dataset.id === highlightedDatasetId ? 1 : 0)),
         },
-        yaxis: {
-          title: axisLabel(datasets[0]?.units.yQuantity ?? 'Ordinate', datasets[0]?.units.y ?? ''),
-          gridcolor: 'rgba(255,255,255,0.08)',
-          zerolinecolor: 'rgba(255,255,255,0.12)',
-          reversed: ordinateReversed,
-          ticksuffix: isPercentUnit(datasets[0]?.units.y ?? '') ? ' %' : undefined,
-        },
-        legend: {
-          bgcolor: 'rgba(20,20,22,0.6)',
-          bordercolor: 'rgba(255,255,255,0.08)',
-          borderwidth: 1,
-        },
-        annotations: buildPeakAnnotations(getPeaksDataset()),
-      },
-      {
-        displaylogo: false,
-        responsive: true,
-      },
-    )
-
-    lastDatasetsRef = datasets
-    lastSelectedSpectrumId = selectedSpectrumId
-
-    attachHoverHandlers()
-    applyHoverOverlay(plotly)
-  }
-
-  function applyHoverOverlay(
-    plotly: typeof Plotly & {
-      Fx?: {
-        hover: (target: HTMLDivElement, points: Array<{ curveNumber: number; pointNumber: number }>) => void
-        unhover: (target: HTMLDivElement) => void
-      }
-    },
-  ): void {
-    if (!container) {
-      return
+        datasets.map((_, index) => index),
+      ))
     }
 
-    const hoverKey = hoverSelection
-      ? `${hoverSelection.datasetId}:${hoverSelection.pointIndex}`
-      : 'none'
-
-    if (hoverKey === lastHoverKey) {
-      return
+    // Heatmap guides and peak rings are layout shapes: an arraydraw relayout, no trace recalculation.
+    const shapesChanged = keys.peak !== applied.peak || (renderedMode === 'heatmap' && (keys.series !== applied.series || keys.hover !== applied.hover))
+    if (shapesChanged) {
+      const layer = highlightShapes(context, state)
+      safe(() => plotly.relayout?.(target, renderedMode === 'heatmap' ? layer : { shapes: layer.shapes }))
     }
-
-    if (hoverSelection) {
-      const traceIndex = datasets.findIndex((dataset) => dataset.id === hoverSelection.datasetId)
-      if (traceIndex >= 0) {
-        plotly.Fx?.hover(container, [{ curveNumber: traceIndex, pointNumber: hoverSelection.pointIndex }])
-        lastHoverKey = hoverKey
-      }
-      return
-    }
-
-    plotly.Fx?.unhover(container)
-    lastHoverKey = 'none'
-  }
-
-  function applyPeakHoverStyle(): void {
-    if (!container) {
-      return
-    }
-
-    const peaksDataset = getPeaksDataset()
-    if (!peaksDataset) {
-      return
-    }
-
-    const hoveredId = peakHoverSelection?.datasetId === peaksDataset.id ? peakHoverSelection.peakId : null
-    const plotly = Plotly as typeof Plotly & {
-      restyle?: (target: HTMLDivElement, update: Record<string, unknown>, indices: number[]) => void
-    }
-
-    plotly.restyle?.(
-      container,
-      { 'marker.size': [peaksDataset.peaks.map((peak) => (peak.id === hoveredId ? 14 : 9))] },
-      [datasets.length],
-    )
-  }
-
-  async function applyPeakZoom(peakId: string | null): Promise<void> {
-    if (!container) {
-      return
-    }
-
-    zoomGeneration += 1
-    const generation = zoomGeneration
-
-    const plotly = Plotly as typeof Plotly & {
-      relayout?: (target: HTMLDivElement, update: Record<string, unknown>) => Promise<unknown>
-    }
-
-    const currentXRange = (): [number, number] | null => {
-      const full = (container as unknown as { _fullLayout?: { xaxis?: { range?: number[] } } })._fullLayout
-      const range = full?.xaxis?.range
-      return range && range.length === 2 ? [Number(range[0]), Number(range[1])] : null
-    }
-
-    const dataXRange = (): [number, number] | null => {
-      const values = datasets.flatMap((dataset) => dataset.data.abscissa)
-      if (values.length === 0) return null
-      return [Math.min(...values), Math.max(...values)]
-    }
-
-    const tweenXRange = (from: [number, number], to: [number, number]): Promise<void> => {
-      if (!container) return Promise.resolve()
-      return zoomTween.run(container, (target, update) => plotly.relayout?.(target, update), from, to)
-    }
-
-    if (peakId) {
-      const peaksDataset = getPeaksDataset()
-      const peak = peaksDataset?.peaks.find((item) => item.id === peakId)
-      if (!peaksDataset || !peak) {
-        return
-      }
-
-      const from = currentXRange() ?? dataXRange()
-      if (!from) {
-        return
-      }
-
-      // Captured once per zoom session so hopping between rows still restores the original view.
-      if (preZoomRange === null) {
-        preZoomRange = { x: from, y: null }
-      }
-
-      const abscissa = peaksDataset.data.abscissa
-      const span = Math.abs((abscissa[abscissa.length - 1] ?? 0) - (abscissa[0] ?? 0)) || 1
-      const margin = Math.max(span * 0.03, 1)
-      const direction = from[0] <= from[1] ? 1 : -1
-      const target: [number, number] = direction === 1
-        ? [peak.x - margin, peak.x + margin]
-        : [peak.x + margin, peak.x - margin]
-
-      await tweenXRange(from, target)
-      return
-    }
-
-    const restore = preZoomRange?.x ?? dataXRange()
-    const from = currentXRange()
-    if (!restore || !from) {
-      preZoomRange = null
-      await plotly.relayout?.(container, { 'xaxis.autorange': true })
-      return
-    }
-
-    await tweenXRange(from, restore)
-
-    if (generation === zoomGeneration) {
-      preZoomRange = null
+    if (renderedMode === 'overlay') {
+      const hover = applied.hover
+      applied = { ...keys, hover }
+      applyOverlayHover(state)
+    } else {
+      applied = keys
     }
   }
+
+  /** Hover traffic arrives far faster than frames; updates are coalesced to one per animation frame. */
+  function scheduleHighlights(..._dependencies: unknown[]): void {
+    if (highlightFrame !== null || typeof requestAnimationFrame === 'undefined') return
+    highlightFrame = requestAnimationFrame(() => {
+      highlightFrame = null
+      applyHighlights()
+    })
+  }
+
+  function checkRender(..._dependencies: unknown[]): void {
+    const key = JSON.stringify(plotStyle)
+    if (!plotReady || (lastRenderedDatasets === datasets && lastRenderedSelection === selectedSpectrumId && key === renderKey)) return
+    lastRenderedDatasets = datasets
+    lastRenderedSelection = selectedSpectrumId
+    renderKey = key
+    void renderPlot()
+  }
+  let lastRenderedDatasets: SpectrumDataset[] | null = null
+  let lastRenderedSelection: string | null = null
 
   onMount(() => {
     if (container && typeof ResizeObserver !== 'undefined') {
       resizeObserver = new ResizeObserver(() => {
-        const plotly = Plotly as typeof Plotly & {
-          Plots?: {
-            resize: (target: HTMLDivElement) => void
-          }
-        }
-
-        if (container) {
-          plotly.Plots?.resize(container)
-        }
+        if (container && plotReady) plotly.Plots?.resize(container)
       })
       resizeObserver.observe(container)
     }
-
+    lastRenderedDatasets = datasets
+    lastRenderedSelection = selectedSpectrumId
+    renderKey = JSON.stringify(plotStyle)
     void renderPlot()
 
     return () => {
-      zoomTween.cancel()
+      peakZoom.reset()
+      if (highlightFrame !== null) cancelAnimationFrame(highlightFrame)
       resizeObserver?.disconnect()
       resizeObserver = null
     }
   })
 
-  function applyHighlightStyle(): void {
-    if (!container || datasets.length === 0) {
-      return
-    }
+  $: if (container) checkRender(datasets, selectedSpectrumId, plotStyle, plotReady)
 
-    const plotly = Plotly as typeof Plotly & {
-      restyle?: (target: HTMLDivElement, update: Record<string, unknown>, indices: number[]) => void
-    }
+  $: if (container && plotReady) scheduleHighlights(highlightedDatasetId, peakHoverSelection, hoverSelection)
 
-    plotly.restyle?.(
-      container,
-      {
-        opacity: datasets.map((dataset) =>
-          dataset.id === selectedSpectrumId || dataset.id === highlightedDatasetId ? 1 : 0.42,
-        ),
-        'line.width': datasets.map((dataset) =>
-          dataset.id === highlightedDatasetId ? dataset.style.lineWidth + 1 : dataset.style.lineWidth,
-        ),
-      },
-      datasets.map((_, index) => index),
-    )
+  $: if (container && plotReady && peakZoomPeakId !== lastAppliedPeakZoomId) {
+    lastAppliedPeakZoomId = peakZoomPeakId
+    void peakZoom.apply(peakZoomPeakId)
   }
 
-  $: if (container && highlightedDatasetId !== lastHighlightedDatasetId) {
-    lastHighlightedDatasetId = highlightedDatasetId
-    applyHighlightStyle()
-  }
-
-  let lastPeakHoverKey = ''
-  $: if (container) {
-    const peakHoverKey = peakHoverSelection ? `${peakHoverSelection.datasetId}:${peakHoverSelection.peakId}` : 'none'
-    if (peakHoverKey !== lastPeakHoverKey) {
-      lastPeakHoverKey = peakHoverKey
-      applyPeakHoverStyle()
-    }
-  }
-
-  $: if (container) {
-    if (peakZoomPeakId !== lastAppliedPeakZoomId) {
-      lastAppliedPeakZoomId = peakZoomPeakId
-      void applyPeakZoom(peakZoomPeakId)
-    }
-  }
-
-  $: if (container) {
-    const hoverKey = hoverSelection
-      ? `${hoverSelection.datasetId}:${hoverSelection.pointIndex}`
-      : 'none'
-
-    if (
-      lastDatasetsRef !== datasets
-      || lastSelectedSpectrumId !== selectedSpectrumId
-      || hoverKey !== lastHoverKey
-    ) {
-      if (lastDatasetsRef !== datasets || lastSelectedSpectrumId !== selectedSpectrumId) {
-        lastHoverKey = hoverKey
-        void renderPlot()
-      } else {
-        const plotly = Plotly as typeof Plotly & {
-          Fx?: {
-            hover: (target: HTMLDivElement, points: Array<{ curveNumber: number; pointNumber: number }>) => void
-            unhover: (target: HTMLDivElement) => void
-          }
-        }
-
-        applyHoverOverlay(plotly)
-      }
-    }
-  }
 </script>
 
-<div class="plotly-panel" bind:this={container}></div>
+<div class="plot-shell">
+  <div class="plotly-panel" bind:this={container}></div>
+  {#if notices.length > 0}
+    <ul class="plot-notices" aria-live="polite">
+      {#each notices as notice}<li>{notice}</li>{/each}
+    </ul>
+  {/if}
+</div>
 
 <style>
+  .plot-shell {
+    position: relative;
+    width: 100%;
+    height: 100%;
+  }
+
   .plotly-panel {
     width: 100%;
     height: 100%;
+  }
+
+  .plot-notices {
+    position: absolute;
+    left: 76px;
+    right: 24px;
+    bottom: 60px;
+    display: grid;
+    gap: 4px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    pointer-events: none;
+  }
+
+  .plot-notices li {
+    justify-self: start;
+    max-width: 100%;
+    padding: 5px 9px;
+    border: 1px solid rgba(214, 177, 109, 0.35);
+    border-radius: 6px;
+    background: rgba(28, 26, 22, 0.88);
+    color: #e2cfa6;
+    font-size: 0.72rem;
+    line-height: 1.35;
   }
 </style>

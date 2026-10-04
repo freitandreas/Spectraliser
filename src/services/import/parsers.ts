@@ -9,7 +9,13 @@ export interface ImportOptions {
   hasHeader: boolean
   xColumn: number
   yColumn: number
-  spectrumType?: 'auto' | SpectrumType
+  spectrumType?: SpectrumType
+  axisMetadata?: {
+    xQuantity: string
+    xUnit: string
+    yQuantity: string
+    yUnit: string
+  }
   seriesLabelOverrides?: string[]
   seriesLabelOverridesByFile?: Record<number, string[]>
 }
@@ -19,6 +25,8 @@ export interface ParsedSpectrum {
   ordinate: number[]
   xUnit?: string
   yUnit?: string
+  xQuantity?: string
+  yQuantity?: string
   spectrumType?: SpectrumType
 }
 
@@ -52,37 +60,53 @@ function splitLines(content: string): string[] {
   return content.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n')
 }
 
-function normalizeUnitToken(value: string): string {
-  return value.toLowerCase().replace(/\s+/g, '').replace(/\u00b9|\^|⁻|−/g, '')
+function inferHeaderUnit(raw: string): string | undefined {
+  const angstrom = raw.match(/Å|angstroms?/i)
+  if (angstrom) return 'Å'
+  const matches = raw.match(/\(([^)]+)\)|\b(cm\s*(?:\^?\s*-?1|⁻¹|−1)|nm|µm|μm|um|microns?|mm|m|hz|ev|s|%)\b/ig)
+  if (!matches?.length) return undefined
+  const token = (matches[matches.length - 1] ?? '').replace(/[()]/g, '').trim()
+  if (/cm/i.test(token)) return /⁻|−/.test(token) ? 'cm⁻¹' : 'cm^-1'
+  if (/^microns?$/i.test(token)) return 'µm'
+  if (/^(?:u|µ|μ)m$/i.test(token)) return 'µm'
+  return token
 }
 
-function inferSpectrumType(xUnit?: string, yUnit?: string, values?: number[]): SpectrumType | undefined {
-  const combined = [xUnit ?? '', yUnit ?? '', ...((values ?? []).slice(0, 4).map(String))].join(' ')
-  const prepared = normalizeUnitToken(combined)
-
-  if (/cm[-]?[0-9]?\^?1|wavenumber|1\/cm|1cm|cm[-]?[0-9]?/i.test(prepared) || /cm[-]?[0-9]?/i.test(xUnit ?? '')) {
-    return 'ir'
-  }
-
-  if (/(raman|raman shift|shift)/i.test(prepared)) {
-    return 'raman'
-  }
-
+function inferXQuantity(header: string, unit?: string): string | undefined {
+  const text = header.toLowerCase()
+  if (/raman/.test(text)) return 'Raman shift'
+  if (/wavenumber|wave\s*number/.test(text) || /cm/i.test(unit ?? '')) return 'Wavenumber'
+  if (/wavelength|lambda|λ/.test(text) || /^(?:å|angstroms?|nm|µm|um|microns?|mm|m)$/i.test(unit ?? '')) return 'Wavelength'
+  if (/frequency/.test(text) || /^hz$/i.test(unit ?? '')) return 'Frequency'
+  if (/energy/.test(text) || /^ev$/i.test(unit ?? '')) return 'Energy'
+  if (/time/.test(text) || /^s$/i.test(unit ?? '')) return 'Time'
   return undefined
 }
 
-function inferHeaderUnit(raw: string): string | undefined {
-  const value = raw.trim()
-  if (!value) {
-    return undefined
-  }
+function inferYQuantity(header: string): string | undefined {
+  const text = header.toLowerCase()
+  if (/absorb/.test(text)) return 'Absorbance'
+  if (/transmitt/.test(text)) return 'Transmittance'
+  if (/reflect/.test(text)) return 'Reflectance'
+  if (/count/.test(text)) return 'Counts'
+  if (/normal/.test(text) && /intens/.test(text)) return 'Normalised intensity'
+  if (/intens|signal|response/.test(text)) return 'Intensity'
+  return undefined
+}
 
-  const match = value.match(/\(([^)]+)\)$/)
-  if (match?.[1]) {
-    return match[1].trim()
+function inferSpectrumType(xHeader: string, xUnit?: string, values?: number[]): SpectrumType | undefined {
+  const text = `${xHeader} ${xUnit ?? ''}`.toLowerCase()
+  if (/raman/.test(text)) return 'raman'
+  if (/wavenumber|wave\s*number/.test(text) || /cm/i.test(xUnit ?? '')) return 'ir'
+  if (/wavelength|absorbance|uv[\s-]?vis/.test(text)) return 'uv-vis'
+  const finite = (values ?? []).filter(Number.isFinite)
+  if (finite.length >= 2) {
+    const min = Math.min(...finite)
+    const max = Math.max(...finite)
+    if (min >= 350 && max <= 5000 && max - min >= 1000) return 'ir'
+    if (min >= 100 && max <= 1200) return 'uv-vis'
   }
-
-  return value
+  return undefined
 }
 
 function parseDelimitedRows(content: string, options: ImportOptions): string[][] {
@@ -153,7 +177,7 @@ function buildSeriesFromRows(
 
     const headerLabel = yHeader.length > 0 ? yHeader : `Series ${yColumn + 1}`
     const label = headerLabel.length > 0 ? headerLabel : `Series ${yColumn + 1}`
-    const detectedSpectrumType = inferSpectrumType(inferredXUnit, inferredYUnit, abscissa)
+    const detectedSpectrumType = inferSpectrumType(xHeader, inferredXUnit, abscissa)
 
     return {
       label,
@@ -161,6 +185,8 @@ function buildSeriesFromRows(
       ordinate,
       xUnit: inferredXUnit,
       yUnit: inferredYUnit,
+      xQuantity: inferXQuantity(xHeader, inferredXUnit),
+      yQuantity: inferYQuantity(yHeader),
       spectrumType: detectedSpectrumType,
     }
   })
@@ -189,6 +215,8 @@ export function parseDelimited(content: string, options: ImportOptions): ParsedS
     ordinate: first.ordinate,
     xUnit: first.xUnit,
     yUnit: first.yUnit,
+    xQuantity: first.xQuantity,
+    yQuantity: first.yQuantity,
     spectrumType: first.spectrumType,
   }
 }
@@ -226,6 +254,8 @@ export function parseXlsx(arrayBuffer: ArrayBuffer, options: ImportOptions): Par
     ordinate: first.ordinate,
     xUnit: first.xUnit,
     yUnit: first.yUnit,
+    xQuantity: first.xQuantity,
+    yQuantity: first.yQuantity,
     spectrumType: first.spectrumType,
   }
 }

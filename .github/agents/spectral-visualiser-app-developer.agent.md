@@ -28,7 +28,7 @@ Build and maintain a browser-based spectroscopy workbench that is:
 ## Tech stack constraints
 
 - Frontend: Svelte, TypeScript, Vite
-- Plotting: Plotly.js using DOM/SVG rendering only
+- Plotting: Plotly.js with DOM/SVG rendering for standard plots; WebGL trace types are permitted when a feature requires genuine 3D visualization (for example, time-series spectral surfaces).
 - Compute: Pyodide in a Web Worker
 - State: Svelte stores, especially projectStore.ts
 - Persistence: IndexedDB for autosave

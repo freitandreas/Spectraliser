@@ -1,29 +1,20 @@
 <script lang="ts">
+  import type { TransformDefinition } from '../../types/project'
+  import SettingBadge from './SettingBadge.svelte'
+  import type { BadgeInfo } from './settingBadge'
   import {
     NORMALIZATION_MODES,
     PEAK_PROFILE_MODELS,
     describeOption,
   } from './workbenchUtils'
 
-  export let dataset: any
-  export let onTransformEnabled: (
-    datasetId: string,
-    transformId: string,
-    enabled: boolean,
-    scope: 'no' | 'individual' | 'global',
-  ) => void
-  export let onTransformScope: (
-    datasetId: string,
-    transformId: string,
-    scope: 'no' | 'individual' | 'global',
-    snapshot: { enabled: boolean; params: Record<string, number | string | boolean> },
-  ) => void
-  export let onTransformParam: (
-    datasetId: string,
-    transformId: string,
-    params: Record<string, number | string | boolean>,
-    currentScope: 'no' | 'individual' | 'global',
-  ) => void
+  type Params = Record<string, number | string | boolean>
+
+  export let pipeline: TransformDefinition[]
+  export let onEnabled: (transformId: string, enabled: boolean) => void
+  export let onParams: (transformId: string, params: Params) => void
+  /** Optional per-step marker, e.g. "differs from general" or "3 samples differ". */
+  export let badgeFor: (type: TransformDefinition['type']) => BadgeInfo | null = () => null
 
   const STEP_META: Record<string, { title: string; summary: string }> = {
     crop: { title: 'Crop', summary: 'Restrict the spectrum to an abscissa window.' },
@@ -41,13 +32,14 @@
 
 <p class="pipeline-intro">Steps run top to bottom on the original data.</p>
 <ol class="pipeline-list">
-  {#each dataset.pipeline as transform, stepIndex (transform.id)}
+  {#each pipeline as transform, stepIndex (transform.id)}
     <li class="pipeline-step" class:active={transform.enabled}>
       <div class="pipeline-step-header">
         <span class="pipeline-index" aria-hidden="true">{stepIndex + 1}</span>
         <div class="pipeline-step-heading">
           <span class="pipeline-step-title">{stepMeta(transform.type).title}</span>
           <span class="pipeline-step-summary">{stepMeta(transform.type).summary}</span>
+          <SettingBadge info={badgeFor(transform.type)} />
         </div>
         <label class="pipeline-switch">
           <input
@@ -55,12 +47,7 @@
             checked={transform.enabled}
             aria-label={`Enable ${stepMeta(transform.type).title}`}
             on:change={(event) =>
-              onTransformEnabled(
-                dataset.id,
-                transform.id,
-                (event.target as HTMLInputElement).checked,
-                transform.scope,
-              )}
+              onEnabled(transform.id, (event.target as HTMLInputElement).checked)}
           />
           <span class="pipeline-switch-track" aria-hidden="true"></span>
         </label>
@@ -76,12 +63,7 @@
                   type="number"
                   value={Number(transform.params.x_min ?? 0)}
                   on:change={(event) =>
-                    onTransformParam(
-                      dataset.id,
-                      transform.id,
-                      { x_min: Number((event.target as HTMLInputElement).value) },
-                      transform.scope,
-                    )}
+                    onParams(transform.id, { x_min: Number((event.target as HTMLInputElement).value) })}
                 />
               </label>
               <label>
@@ -90,12 +72,7 @@
                   type="number"
                   value={Number(transform.params.x_max ?? 0)}
                   on:change={(event) =>
-                    onTransformParam(
-                      dataset.id,
-                      transform.id,
-                      { x_max: Number((event.target as HTMLInputElement).value) },
-                      transform.scope,
-                    )}
+                    onParams(transform.id, { x_max: Number((event.target as HTMLInputElement).value) })}
                 />
               </label>
             </div>
@@ -111,12 +88,7 @@
                   max="6"
                   value={Number(transform.params.order ?? 3)}
                   on:change={(event) =>
-                    onTransformParam(
-                      dataset.id,
-                      transform.id,
-                      { order: Number((event.target as HTMLInputElement).value) },
-                      transform.scope,
-                    )}
+                    onParams(transform.id, { order: Number((event.target as HTMLInputElement).value) })}
                 />
               </label>
             </div>
@@ -132,12 +104,7 @@
                   step="2"
                   value={Number(transform.params.window_length ?? 15)}
                   on:change={(event) =>
-                    onTransformParam(
-                      dataset.id,
-                      transform.id,
-                      { window_length: Number((event.target as HTMLInputElement).value) },
-                      transform.scope,
-                    )}
+                    onParams(transform.id, { window_length: Number((event.target as HTMLInputElement).value) })}
                 />
               </label>
               <label>
@@ -147,12 +114,7 @@
                   min="1"
                   value={Number(transform.params.polyorder ?? 2)}
                   on:change={(event) =>
-                    onTransformParam(
-                      dataset.id,
-                      transform.id,
-                      { polyorder: Number((event.target as HTMLInputElement).value) },
-                      transform.scope,
-                    )}
+                    onParams(transform.id, { polyorder: Number((event.target as HTMLInputElement).value) })}
                 />
               </label>
             </div>
@@ -165,12 +127,7 @@
                 <select
                   value={String(transform.params.mode ?? 'minmax')}
                   on:change={(event) =>
-                    onTransformParam(
-                      dataset.id,
-                      transform.id,
-                      { mode: (event.target as HTMLSelectElement).value },
-                      transform.scope,
-                    )}
+                    onParams(transform.id, { mode: (event.target as HTMLSelectElement).value })}
                 >
                   {#each NORMALIZATION_MODES as mode (mode.id)}
                     <option value={mode.id}>{mode.label} — {mode.description}</option>
@@ -190,12 +147,7 @@
                 <select
                   value={String(transform.params.model ?? 'gaussian')}
                   on:change={(event) =>
-                    onTransformParam(
-                      dataset.id,
-                      transform.id,
-                      { model: (event.target as HTMLSelectElement).value },
-                      transform.scope,
-                    )}
+                    onParams(transform.id, { model: (event.target as HTMLSelectElement).value })}
                 >
                   {#each PEAK_PROFILE_MODELS as model (model.id)}
                     <option value={model.id}>{model.label} — {model.description}</option>
@@ -210,12 +162,7 @@
                   step="0.01"
                   value={Number(transform.params.prominence ?? 0.05)}
                   on:change={(event) =>
-                    onTransformParam(
-                      dataset.id,
-                      transform.id,
-                      { prominence: Number((event.target as HTMLInputElement).value) },
-                      transform.scope,
-                    )}
+                    onParams(transform.id, { prominence: Number((event.target as HTMLInputElement).value) })}
                 />
               </label>
               <p class="option-description">
@@ -224,24 +171,6 @@
             </div>
           {/if}
 
-          <div class="pipeline-scope">
-            <span>Apply to</span>
-            <select
-              value={transform.scope}
-              aria-label={`${stepMeta(transform.type).title} scope`}
-              on:change={(event) =>
-                onTransformScope(
-                  dataset.id,
-                  transform.id,
-                  (event.target as HTMLSelectElement).value as 'no' | 'individual' | 'global',
-                  { enabled: transform.enabled, params: transform.params },
-                )}
-            >
-              <option value="no">Not applied</option>
-              <option value="individual">This sample</option>
-              <option value="global">All samples</option>
-            </select>
-          </div>
         </div>
       {/if}
     </li>

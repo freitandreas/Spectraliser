@@ -1,5 +1,6 @@
 import * as pako from 'pako'
 import type { AppState } from '../../types/project'
+import { effectivePythonFiles } from '../script/scriptGenerator'
 
 function toBase64(bytes: Uint8Array): string {
   let binary = ''
@@ -14,6 +15,8 @@ export function generateSelfContainedHtmlReport(state: AppState): string {
   const payload = JSON.stringify(state)
   const compressed = pako.gzip(payload)
   const encoded = toBase64(compressed)
+  const mainScript = state.userScriptOverride
+    ?? effectivePythonFiles(state.datasets, state.generatedScript, state.pythonFileOverrides ?? {})['main.py']
 
   return `<!doctype html>
 <html lang="en">
@@ -34,7 +37,7 @@ export function generateSelfContainedHtmlReport(state: AppState): string {
     <h2>Methodology Audit Trail</h2>
     <pre>${state.datasets.map((dataset) => `${dataset.name}: ${dataset.pipeline.map((step) => step.type).join(' -> ')}`).join('\n')}</pre>
     <h2>Generated Script</h2>
-    <pre>${state.generatedScript.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>
+    <pre>${mainScript.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>
     <script>
       window.__SPECTRALAB_COMPRESSED_STATE__ = '${encoded}'
     </script>

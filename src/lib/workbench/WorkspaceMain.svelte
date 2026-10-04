@@ -7,6 +7,9 @@
   import SampleDataTable from './SampleDataTable.svelte'
   import PeakWorkspace from './PeakWorkspace.svelte'
   import ScriptWorkspace from './ScriptWorkspace.svelte'
+  import type { PlotStylePreferences } from '../../services/startupPreferences'
+  import { peakSingleSeriesView } from '../../state/displaySettings'
+  import { singleSeriesView, type PlotView } from '../plot/singleSeriesView'
 
   export let visibleDatasets: any[]
   export let selectedSpectrumId: string | null
@@ -17,6 +20,7 @@
   export let bottomPanelOpen: boolean
   export let bottomPanelHeight: number
   export let highlightedDatasetId: string | null = null
+  export let plotStyle: PlotStylePreferences
   export let onClearFileSelection: () => void
   export let onStartBottomResize: (event: MouseEvent) => void
   export let onOpenSubTab: (datasetId: string, subView: SampleSubView) => void
@@ -35,6 +39,12 @@
   let peakMode: 'maxima' | 'minima' = 'maxima'
   let scriptExecutionTrigger = 0
 
+  $: peakPanelActive = activeSampleSubView === 'peaks' && activeWorkspaceTab !== 'script_view' && !!activeSampleTabDataset
+  let plotView: PlotView
+  $: plotView = peakPanelActive && $peakSingleSeriesView
+    ? singleSeriesView(activeSampleTabDataset, plotStyle)
+    : { datasets: visibleDatasets, plotStyle, selectedSpectrumId }
+
   $: if (activeWorkspaceTab === 'script_view' || !activeSampleTabDataset) {
     hoverSelection = null
   }
@@ -51,20 +61,19 @@
     peakMode = activeSampleTabDataset.peakDetection.mode
   }
 
+  // Hover state fans out to the plot and both tables; it is only reassigned when it actually changes.
   function setHoverSelection(datasetId: string, pointIndex: number | null): void {
-    if (pointIndex === null) {
-      hoverSelection = null
+    if (pointIndex === null || activeSampleTabDataset?.id !== datasetId) {
+      if (hoverSelection) hoverSelection = null
       return
     }
-
-    if (activeSampleTabDataset?.id === datasetId) {
-      hoverSelection = { datasetId, pointIndex }
-    }
+    if (hoverSelection?.datasetId === datasetId && hoverSelection.pointIndex === pointIndex) return
+    hoverSelection = { datasetId, pointIndex }
   }
 
   function handlePlotHover(event: CustomEvent<{ datasetId: string; pointIndex: number } | null>): void {
     if (!event.detail) {
-      hoverSelection = null
+      if (hoverSelection) hoverSelection = null
       return
     }
     setHoverSelection(event.detail.datasetId, event.detail.pointIndex)
@@ -74,12 +83,16 @@
     if (!activeSampleTabDataset || activeSampleSubView !== 'peaks') return
     if (event.detail.datasetId !== activeSampleTabDataset.id) return
     projectStore.addPeakAtIndex(event.detail.datasetId, event.detail.pointIndex)
-    triggerScriptExecution()
   }
 
   function setPeakHover(datasetId: string, peakId: string | null, fromTable: boolean): void {
-    peakHoverSelection = peakId ? { datasetId, peakId } : null
-    if (fromTable) peakZoomPeakId = peakId
+    if (fromTable && peakZoomPeakId !== peakId) peakZoomPeakId = peakId
+    if (!peakId) {
+      if (peakHoverSelection) peakHoverSelection = null
+      return
+    }
+    if (peakHoverSelection?.datasetId === datasetId && peakHoverSelection.peakId === peakId) return
+    peakHoverSelection = { datasetId, peakId }
   }
 
   function handlePlotPeakHover(event: CustomEvent<{ datasetId: string; peakId: string } | null>): void {
@@ -107,7 +120,6 @@
 
   function handlePeakModeChange(mode: 'maxima' | 'minima'): void {
     peakMode = mode
-    triggerScriptExecution()
   }
 
   function handlePeakParametersChange(): void {
@@ -118,7 +130,6 @@
       minHeight: peakMinHeight,
       mode: peakMode,
     })
-    triggerScriptExecution()
   }
 
   export function clearHoverSelection(): void {
@@ -141,13 +152,14 @@
 >
   <section class="plot-shell" role="presentation" on:click={clearSelection}>
     <PlotPanel
-      datasets={visibleDatasets}
-      {selectedSpectrumId}
+      datasets={plotView.datasets}
+      selectedSpectrumId={plotView.selectedSpectrumId}
       {hoverSelection}
       {peakHoverSelection}
       {peakZoomPeakId}
       {highlightedDatasetId}
-      peakPickingEnabled={activeSampleSubView === 'peaks' && activeWorkspaceTab !== 'script_view'}
+      plotStyle={plotView.plotStyle}
+      peakPickingEnabled={peakPanelActive}
       on:hoverpoint={handlePlotHover}
       on:peakpick={handlePlotPeakPick}
       on:peakhover={handlePlotPeakHover}

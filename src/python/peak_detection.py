@@ -41,7 +41,12 @@ def normalize_settings(settings=None):
 def detection_signal(ordinate, mode=DEFAULT_MODE):
     """Return the signal find_peaks runs on; minima are detected on -y."""
     values = np.asarray(ordinate, dtype=float)
-    return -values if str(mode).lower() == 'minima' else values
+    signal = -values if str(mode).lower() == 'minima' else values
+    gaps = ~np.isfinite(signal)
+    if gaps.any() and not gaps.all():
+        # Points removed by a crop are NaN; the floor value can never be a peak.
+        signal = np.where(gaps, np.min(signal[~gaps]), signal)
+    return signal
 
 
 def find_peaks_kwargs(settings=None):

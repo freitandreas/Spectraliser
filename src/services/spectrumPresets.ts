@@ -1,4 +1,5 @@
 import type { SpectrumType } from '../types/project'
+import { escapeHtml, quantityHtml, quantityPlain, quantitySymbol, type QuantityNotation } from './quantityNotation'
 
 export const BLANK_UNIT = ''
 
@@ -64,9 +65,50 @@ export function percentScaleFactor(fromUnit: string, toUnit: string): number | n
   return to ? 100 : 0.01
 }
 
-/** Renders `quantity / unit`, dropping the divisor for dimensionless axes. */
-export function axisLabel(quantity: string, unit: string, subscript = ''): string {
-  const name = subscript ? `${quantity} (${subscript})` : quantity
+export type AxisLabelFormat = 'slash' | 'fraction' | 'in'
+
+export const AXIS_LABEL_FORMATS: Array<{ id: AxisLabelFormat; label: string; example: string }> = [
+  { id: 'slash', label: 'Quantity / unit', example: 'Wavelength / nm' },
+  { id: 'fraction', label: 'Fraction', example: '\\frac{Wavelength}{nm}' },
+  { id: 'in', label: 'Quantity in unit', example: 'Wavelength in nm' },
+]
+
+function texText(value: string): string {
+  return value.replace(/[\\{}$%&#_^~]/g, (char) => (char === '\\' ? '\\backslash ' : `\\${char}`))
+}
+
+function texUnit(unit: string): string {
+  return canonicalUnit(unit)
+    .replace(/[{}$&#_~]/g, (char) => `\\${char}`)
+    .replace(/%/g, '\\%')
+    .replace(/µ/g, '\\mu ')
+    .replace(/\^(-?\d+)/g, '^{$1}')
+    .replace(/ /g, '\\,')
+}
+
+export type AxisLabelTarget = 'plotly' | 'plain'
+
+/**
+ * Renders an axis title in the selected IUPAC-style form. Dimensionless axes show the
+ * quantity alone. The fraction form is TeX for Plotly's MathJax renderer; the `plain`
+ * target never emits markup or TeX, for WebGL titles, CSV headers and form examples.
+ */
+export function axisLabel(
+  quantity: string,
+  unit: string,
+  format: AxisLabelFormat = 'slash',
+  notation: QuantityNotation = 'name',
+  target: AxisLabelTarget = 'plain',
+): string {
   const formatted = formatUnit(unit).trim()
-  return formatted ? `${name} / ${formatted}` : name
+  const symbol = quantitySymbol(quantity, notation)
+  const name = target === 'plain' ? quantityPlain(quantity, notation) : quantityHtml(quantity, notation)
+  if (!formatted) return name
+  const unitText = target === 'plain' ? formatted : escapeHtml(formatted)
+  if (format === 'in') return `${name} in ${unitText}`
+  if (format === 'fraction' && target === 'plotly') {
+    const numerator = symbol ? symbol.tex : `\\text{${texText(quantity)}}`
+    return `$\\frac{${numerator}}{\\mathrm{${texUnit(unit)}}}$`
+  }
+  return `${name} / ${unitText}`
 }

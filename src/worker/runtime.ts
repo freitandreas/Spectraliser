@@ -1,7 +1,7 @@
 import type { WorkerResponse } from './messages'
 import { workerRequestSchema } from './messages'
 import { logInfo, logWarn, logError, state, ensurePyodideReady } from './runtimeCore'
-import { executeScript } from './scriptRuntime'
+import { executeBatch } from './scriptRuntime'
 import { detectPeaks, computePeakHeatmap } from './peakRuntime'
 
 export async function handleWorkerRequest(requestRaw: unknown): Promise<WorkerResponse> {
@@ -50,8 +50,8 @@ export async function handleWorkerRequest(requestRaw: unknown): Promise<WorkerRe
   }
 
   try {
-    if (request.type === 'execute_script') {
-      return await executeScript(request)
+    if (request.type === 'execute_batch') {
+      return await executeBatch(request)
     }
 
     if (request.type === 'detect_peaks') {

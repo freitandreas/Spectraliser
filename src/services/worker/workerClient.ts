@@ -1,4 +1,4 @@
-import type { WorkerRequest, WorkerResponse } from '../../worker/messages'
+import type { BatchRequest, WorkerRequest, WorkerResponse } from '../../worker/messages'
 
 type PendingResolver = {
   resolve: (value: WorkerResponse) => void
@@ -39,60 +39,9 @@ export class WorkerClient {
     return this.initPromise
   }
 
-  async executeScript(input: {
-    spectrumId: string
-    abscissa: number[]
-    ordinate: number[]
-    metadata: {
-      name: string
-      sourcePath: string
-      spectrumType: string
-      pipeline?: Array<{
-        id: string
-        type: string
-        scope: string
-        enabled: boolean
-        params: Record<string, number | string | boolean>
-      }>
-      units: {
-        x: string
-        y: string
-      }
-      style: {
-        label: string
-        lineColor: string
-        lineWidth: number
-        scatterSymbol: string
-        visible?: boolean
-      }
-      peakDetectionMode?: 'maxima' | 'minima'
-      peakDetection?: {
-        prominence: number
-        minDistance: number
-        minHeight: number | null
-        mode: 'maxima' | 'minima'
-      }
-    }
-    scriptCode: string
-    scriptFiles?: Record<string, string>
-    preferFloat32: boolean
-  }): Promise<WorkerResponse> {
+  async executeBatch(input: Omit<BatchRequest, 'type' | 'requestId'>): Promise<WorkerResponse> {
     await this.init()
-
-    const requestId = createId('exec_script')
-    const request: WorkerRequest = {
-      type: 'execute_script',
-      requestId,
-      spectrumId: input.spectrumId,
-      abscissa: input.abscissa,
-      ordinate: input.ordinate,
-      metadata: input.metadata,
-      scriptCode: input.scriptCode,
-      scriptFiles: input.scriptFiles,
-      preferFloat32: input.preferFloat32,
-    }
-
-    return this.enqueueRequest(request)
+    return this.enqueueRequest({ type: 'execute_batch', requestId: createId('exec_batch'), ...input })
   }
 
   async detectPeaks(input: {

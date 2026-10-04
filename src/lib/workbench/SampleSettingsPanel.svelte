@@ -1,6 +1,5 @@
 <script lang="ts">
   import { tick } from 'svelte'
-  import { canConvertAbscissa } from '../../services/import/unitConversion'
   import {
     ABSCISSA_QUANTITIES,
     ABSCISSA_UNITS,
@@ -10,32 +9,21 @@
     formatUnit,
   } from '../../services/spectrumPresets'
   import PipelineEditor from './PipelineEditor.svelte'
+  import SettingBadge from './SettingBadge.svelte'
+  import type { BadgeInfo } from './settingBadge'
+  import { pipelineKey, type SettingKey } from '../../services/generalSettings'
+  import SeriesCoordinateEditor from './SeriesCoordinateEditor.svelte'
 
   export let dataset: any
   export let activeTab: 'general' | 'style' | 'pipeline'
   export let onRename: (datasetId: string, label: string) => void
   export let onUpdateStyle: (datasetId: string, patch: Record<string, unknown>) => void
   export let onUpdateMetadata: (datasetId: string, patch: Record<string, unknown>) => void
-  export let onConvertAbscissa: (datasetId: string, targetUnit: string) => void
   export let onRerunPipeline: (datasetId: string) => void
-  export let onTransformEnabled: (
-    datasetId: string,
-    transformId: string,
-    enabled: boolean,
-    scope: 'no' | 'individual' | 'global',
-  ) => void
-  export let onTransformScope: (
-    datasetId: string,
-    transformId: string,
-    scope: 'no' | 'individual' | 'global',
-    snapshot: { enabled: boolean; params: Record<string, number | string | boolean> },
-  ) => void
-  export let onTransformParam: (
-    datasetId: string,
-    transformId: string,
-    params: Record<string, number | string | boolean>,
-    currentScope: 'no' | 'individual' | 'global',
-  ) => void
+  export let onTransformEnabled: (datasetId: string, transformId: string, enabled: boolean) => void
+  export let onTransformParam: (datasetId: string, transformId: string, params: Record<string, number | string | boolean>) => void
+  /** Marks a setting whose value differs from the general settings. */
+  export let badgeFor: (key: SettingKey) => BadgeInfo | null = () => null
 
   const commonAbscissaUnits = [...ABSCISSA_UNITS, 'Custom']
   const commonOrdinateUnits = [...ORDINATE_UNITS, 'Custom']
@@ -53,7 +41,6 @@
   let yQuantityPreset = 'Custom'
   let xQuantityCustomValue = ''
   let yQuantityCustomValue = ''
-  let conversionTargetUnit = ''
 
   function unitLabel(unit: string): string {
     return unit === BLANK_UNIT ? '(none)' : formatUnit(unit)
@@ -72,7 +59,6 @@
     yQuantityPreset = ordinateQuantities.includes(dataset.units.yQuantity) ? dataset.units.yQuantity : 'Custom'
     xQuantityCustomValue = xQuantityPreset === 'Custom' ? dataset.units.xQuantity : ''
     yQuantityCustomValue = yQuantityPreset === 'Custom' ? dataset.units.yQuantity : ''
-    conversionTargetUnit = dataset.units.x
   }
 
   async function startTitleEdit(): Promise<void> {
@@ -150,7 +136,7 @@
         </select>
       </label>
       <label>
-        Abscissa physical quantity
+        <span class="setting-label-row">Abscissa physical quantity <SettingBadge info={badgeFor('xQuantity')} /></span>
         <select
           value={xQuantityPreset}
           on:change={(event) => {
@@ -177,7 +163,7 @@
         {/if}
       </label>
       <label>
-        Abscissa units
+        <span class="setting-label-row">Abscissa units <SettingBadge info={badgeFor('xUnit')} /></span>
         <select
           value={xUnitPreset}
           on:change={(event) => {
@@ -206,23 +192,7 @@
         {/if}
       </label>
       <label>
-        Convert abscissa values
-        <select bind:value={conversionTargetUnit}>
-          {#each ['nm', 'µm', 'm', 'cm⁻¹'] as unit}
-            <option value={unit}>{unit}</option>
-          {/each}
-        </select>
-        <button
-          type="button"
-          class="ghost"
-          disabled={conversionTargetUnit === dataset.units.x || !canConvertAbscissa(dataset.units.x, conversionTargetUnit)}
-          on:click={() => onConvertAbscissa(dataset.id, conversionTargetUnit)}
-        >
-          Convert values
-        </button>
-      </label>
-      <label>
-        Ordinate physical quantity
+        <span class="setting-label-row">Ordinate physical quantity <SettingBadge info={badgeFor('yQuantity')} /></span>
         <select
           value={yQuantityPreset}
           on:change={(event) => {
@@ -249,7 +219,7 @@
         {/if}
       </label>
       <label>
-        Ordinate units
+        <span class="setting-label-row">Ordinate units <SettingBadge info={badgeFor('yUnit')} /></span>
         <select
           value={yUnitPreset}
           on:change={(event) => {
@@ -277,13 +247,18 @@
           />
         {/if}
       </label>
+      <SeriesCoordinateEditor
+        label={dataset.style.label}
+        coordinate={dataset.seriesCoordinate}
+        onChange={(seriesCoordinate) => onUpdateMetadata(dataset.id, { seriesCoordinate })}
+      />
     </div>
   {/if}
 
   {#if activeTab === 'style'}
     <div class="settings-card">
       <label>
-        Line colour
+        <span class="setting-label-row">Line colour <SettingBadge info={badgeFor('lineColor')} /></span>
         <input
           type="color"
           value={dataset.style.lineColor}
@@ -291,7 +266,7 @@
         />
       </label>
       <label>
-        Line width
+        <span class="setting-label-row">Line width <SettingBadge info={badgeFor('lineWidth')} /></span>
         <input
           type="range"
           min="1"
@@ -308,6 +283,7 @@
           on:change={(event) => onUpdateStyle(dataset.id, { abscissaInverted: (event.target as HTMLInputElement).checked })}
         />
         <span>Invert abscissa axis</span>
+        <SettingBadge info={badgeFor('abscissaInverted')} />
       </label>
       <label class="toggle-field">
         <input
@@ -316,6 +292,7 @@
           on:change={(event) => onUpdateStyle(dataset.id, { ordinateInverted: (event.target as HTMLInputElement).checked })}
         />
         <span>Invert ordinate axis</span>
+        <SettingBadge info={badgeFor('ordinateInverted')} />
       </label>
       <button type="button" class="run" on:click={() => onRerunPipeline(dataset.id)}>
         Recalculate this sample
@@ -326,10 +303,10 @@
   {#if activeTab === 'pipeline'}
     <div class="settings-card">
       <PipelineEditor
-        {dataset}
-        {onTransformEnabled}
-        {onTransformScope}
-        {onTransformParam}
+        pipeline={dataset.pipeline}
+        onEnabled={(transformId, enabled) => onTransformEnabled(dataset.id, transformId, enabled)}
+        onParams={(transformId, params) => onTransformParam(dataset.id, transformId, params)}
+        badgeFor={(type) => badgeFor(pipelineKey(type))}
       />
     </div>
   {/if}

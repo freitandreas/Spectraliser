@@ -1,49 +1,72 @@
 <script lang="ts">
-  import { DEFAULT_STYLE, type NormalizationMode } from '../../types/project'
+  import { QUANTITY_NOTATIONS, type QuantityNotation } from '../../services/quantityNotation'
   import {
     ABSCISSA_QUANTITIES,
     ABSCISSA_UNITS,
+    AXIS_LABEL_FORMATS,
     BLANK_UNIT,
     ORDINATE_QUANTITIES,
     ORDINATE_UNITS,
     axisDefaultsFor,
     formatUnit,
+    type AxisLabelFormat,
   } from '../../services/spectrumPresets'
-  import { COLOR_PALETTES, NORMALIZATION_MODES, describeOption } from './workbenchUtils'
+  import type { ComputePrecision, PlotStylePreferences } from '../../services/startupPreferences'
+  import { pipelineKey, type GeneralAxes, type GeneralSettingsSnapshot, type SettingKey } from '../../services/generalSettings'
+  import type { GeneralChange } from '../../state/generalSettingsActions'
+  import type { SpectrumType } from '../../types/project'
+  import PlotModeSettings from '../PlotModeSettings.svelte'
+  import ComputePrecisionSettings from '../ComputePrecisionSettings.svelte'
+  import PipelineEditor from './PipelineEditor.svelte'
+  import SettingBadge from './SettingBadge.svelte'
+  import type { BadgeInfo } from './settingBadge'
+  import { COLOR_PALETTES, PALETTE_KIND_LABELS, paletteGradientCss, type PaletteKind } from '../../services/palettes'
 
   export let activeTab: 'axes' | 'appearance' | 'processing'
+  export let snapshot: GeneralSettingsSnapshot
   export let datasetCount: number
-  export let onApplyPalette: (paletteId: string) => void
-  export let onApplyLineWidth: (width: number) => void
-  export let onApplyNormalization: (mode: NormalizationMode) => void
-  export let onApplySmoothing: (windowLength: number, polyorder: number) => void
-  export let onApplyAxisMetadata: (metadata: { xQuantity: string; xUnit: string; yQuantity: string; yUnit: string }) => void
+  export let deviatingCount: number
+  export let badgeFor: (key: SettingKey) => BadgeInfo | null
+  export let onShowDifferences: () => void
+  export let onChange: (change: GeneralChange) => void
+  export let plotStyle: PlotStylePreferences
+  export let onUpdatePlotStyle: (next: PlotStylePreferences) => void
+  export let computePrecision: ComputePrecision
+  export let onUpdateComputePrecision: (next: ComputePrecision) => void
 
-  let paletteId = COLOR_PALETTES[0].id
-  let lineWidth = DEFAULT_STYLE.lineWidth
-  let normalizationMode: NormalizationMode = 'minmax'
-  let smoothingWindow = 15
-  let smoothingPolyorder = 2
-  let spectrumType: 'uv-vis' | 'ir' | 'raman' = 'uv-vis'
-  let xQuantity = 'Wavelength'
-  let xUnit = 'nm'
-  let yQuantity = 'Absorbance'
-  let yUnit = BLANK_UNIT
+  const UNITS_BY_QUANTITY: Record<string, string[]> = {
+    Wavelength: ['nm', 'µm', 'm'],
+    Wavenumber: ['cm⁻¹'],
+    'Raman shift': ['cm⁻¹'],
+    Frequency: ['Hz'],
+    Energy: ['eV'],
+    Time: ['s'],
+  }
+
+  $: axes = snapshot.axes
+  $: availableXUnits = UNITS_BY_QUANTITY[axes.xQuantity] ?? [...ABSCISSA_UNITS]
+  const PALETTE_GROUPS = (Object.keys(PALETTE_KIND_LABELS) as PaletteKind[]).map((kind) => ({
+    label: PALETTE_KIND_LABELS[kind],
+    palettes: COLOR_PALETTES.filter((palette) => palette.kind === kind),
+  }))
 
   function unitLabel(unit: string): string {
     return unit === BLANK_UNIT ? '(none)' : formatUnit(unit)
   }
 
-  function applySpectrumTypeDefaults(nextType: 'uv-vis' | 'ir' | 'raman'): void {
-    const defaults = axisDefaultsFor(nextType)
-    spectrumType = nextType
-    xQuantity = defaults.xQuantity
-    xUnit = defaults.x
-    yQuantity = defaults.yQuantity
-    yUnit = defaults.y
+  function changeAxes(patch: Partial<GeneralAxes>): void {
+    onChange({ kind: 'axes', axes: { ...axes, ...patch } })
   }
 
-  $: activePalette = COLOR_PALETTES.find((palette) => palette.id === paletteId) ?? COLOR_PALETTES[0]
+  function applyPreset(raw: string): void {
+    if (raw !== 'uv-vis' && raw !== 'ir' && raw !== 'raman') return
+    const defaults = axisDefaultsFor(raw as SpectrumType)
+    changeAxes({ xQuantity: defaults.xQuantity, xUnit: defaults.x, yQuantity: defaults.yQuantity, yUnit: defaults.y })
+  }
+
+  function selectValue(event: Event): string {
+    return (event.target as HTMLSelectElement).value
+  }
 </script>
 
 <section class="sample-settings">
@@ -52,136 +75,163 @@
   </header>
 
   <p class="general-settings-hint">
-    {datasetCount} sample{datasetCount === 1 ? '' : 's'} loaded. Changes here overwrite every spectrum at once.
+    {datasetCount} sample{datasetCount === 1 ? '' : 's'} loaded. Samples follow these values unless they were given their own.
   </p>
+  {#if deviatingCount > 0}
+    <button type="button" class="general-deviation-link" on:click={onShowDifferences}>
+      {deviatingCount} sample{deviatingCount === 1 ? ' doesn’t' : 's don’t'} follow all general settings
+    </button>
+  {:else if datasetCount > 0}
+    <p class="general-settings-hint">All samples follow the general settings.</p>
+  {/if}
 
   {#if activeTab === 'axes'}
     <div class="settings-card">
       <label>
-        Spectrum type preset
-        <select
-          value={spectrumType}
-          on:change={(event) => {
-            const raw = (event.target as HTMLSelectElement).value
-            applySpectrumTypeDefaults(raw === 'ir' || raw === 'raman' ? raw : 'uv-vis')
-          }}
-        >
+        Axis preset
+        <select value="" on:change={(event) => { applyPreset(selectValue(event)); (event.target as HTMLSelectElement).value = '' }}>
+          <option value="" disabled>Load spectrum-type defaults…</option>
           <option value="uv-vis">UV-Vis</option>
           <option value="ir">IR</option>
           <option value="raman">Raman</option>
         </select>
       </label>
       <label>
-        Abscissa physical quantity
-        <select bind:value={xQuantity}>
+        <span class="setting-label-row">Abscissa physical quantity <SettingBadge info={badgeFor('xQuantity')} /></span>
+        <select
+          value={axes.xQuantity}
+          on:change={(event) => {
+            const xQuantity = selectValue(event)
+            changeAxes({ xQuantity, xUnit: UNITS_BY_QUANTITY[xQuantity]?.[0] ?? axes.xUnit })
+          }}
+        >
           {#each ABSCISSA_QUANTITIES as quantity}
             <option value={quantity}>{quantity}</option>
           {/each}
         </select>
       </label>
       <label>
-        Abscissa units
-        <select bind:value={xUnit}>
-          {#each ABSCISSA_UNITS as unit}
+        <span class="setting-label-row">Abscissa units <SettingBadge info={badgeFor('xUnit')} /></span>
+        <select value={axes.xUnit} on:change={(event) => changeAxes({ xUnit: selectValue(event) })}>
+          {#each availableXUnits as unit}
             <option value={unit}>{unitLabel(unit)}</option>
           {/each}
         </select>
       </label>
       <label>
-        Ordinate physical quantity
-        <select bind:value={yQuantity}>
+        <span class="setting-label-row">Ordinate physical quantity <SettingBadge info={badgeFor('yQuantity')} /></span>
+        <select value={axes.yQuantity} on:change={(event) => changeAxes({ yQuantity: selectValue(event) })}>
           {#each ORDINATE_QUANTITIES as quantity}
             <option value={quantity}>{quantity}</option>
           {/each}
         </select>
       </label>
       <label>
-        Ordinate units
-        <select bind:value={yUnit}>
+        <span class="setting-label-row">Ordinate units <SettingBadge info={badgeFor('yUnit')} /></span>
+        <select value={axes.yUnit} on:change={(event) => changeAxes({ yUnit: selectValue(event) })}>
           {#each ORDINATE_UNITS as unit}
             <option value={unit}>{unitLabel(unit)}</option>
           {/each}
         </select>
       </label>
-      <button
-        type="button"
-        class="run"
-        disabled={datasetCount === 0}
-        on:click={() => onApplyAxisMetadata({ xQuantity, xUnit, yQuantity, yUnit })}
-      >
-        Apply to all samples
-      </button>
+      <p class="option-description">
+        Changes convert sample data numerically (wavelength ↔ wavenumber, absorbance ↔ transmittance, percent scaling);
+        incompatible quantities are rejected.
+      </p>
     </div>
   {/if}
 
   {#if activeTab === 'appearance'}
     <div class="settings-card">
+      <strong class="card-title">Spectrum plot</strong>
+      <PlotModeSettings {plotStyle} onChange={onUpdatePlotStyle} compact />
       <label>
-        Colour palette
-        <select bind:value={paletteId}>
-          {#each COLOR_PALETTES as palette (palette.id)}
-            <option value={palette.id}>{palette.name}</option>
+        Axis label format
+        <select
+          value={plotStyle.axisLabelFormat}
+          on:change={(event) => onUpdatePlotStyle({ ...plotStyle, axisLabelFormat: selectValue(event) as AxisLabelFormat })}
+        >
+          {#each AXIS_LABEL_FORMATS as format (format.id)}
+            <option value={format.id}>{format.label}</option>
           {/each}
         </select>
       </label>
-      <div class="palette-preview">
-        {#each activePalette.colors as color}
-          <span class="palette-swatch" style={`background:${color};`}></span>
-        {/each}
-      </div>
-      <button type="button" class="run" disabled={datasetCount === 0} on:click={() => onApplyPalette(paletteId)}>
-        Apply palette to all samples
-      </button>
+      <label>
+        Quantity notation
+        <select
+          value={plotStyle.quantityNotation}
+          on:change={(event) => onUpdatePlotStyle({ ...plotStyle, quantityNotation: selectValue(event) as QuantityNotation })}
+        >
+          {#each QUANTITY_NOTATIONS as notation (notation.id)}
+            <option value={notation.id}>{notation.label}</option>
+          {/each}
+        </select>
+      </label>
+    </div>
+    <div class="settings-card">
+      <label>
+        <span class="setting-label-row">Colour palette <SettingBadge info={badgeFor('lineColor')} /></span>
+        <select value={snapshot.paletteId} on:change={(event) => onChange({ kind: 'palette', paletteId: selectValue(event) })}>
+          {#each PALETTE_GROUPS as group (group.label)}
+            <optgroup label={group.label}>
+              {#each group.palettes as palette (palette.id)}
+                <option value={palette.id}>{palette.name}</option>
+              {/each}
+            </optgroup>
+          {/each}
+        </select>
+      </label>
+      <div class="palette-preview" style={`background:${paletteGradientCss(snapshot.paletteId)};`} title="Each sample gets its own colour, spread evenly along this gradient."></div>
 
       <label>
-        Line width
-        <input type="range" min="1" max="6" step="0.5" bind:value={lineWidth} />
+        <span class="setting-label-row">Line width <b>{snapshot.lineWidth}px</b> <SettingBadge info={badgeFor('lineWidth')} /></span>
+        <input
+          type="range"
+          min="1"
+          max="6"
+          step="0.5"
+          value={snapshot.lineWidth}
+          on:change={(event) => onChange({ kind: 'lineWidth', lineWidth: Number((event.target as HTMLInputElement).value) })}
+        />
       </label>
-      <span class="general-settings-value">{lineWidth}px</span>
-      <button type="button" class="run" disabled={datasetCount === 0} on:click={() => onApplyLineWidth(lineWidth)}>
-        Apply width to all samples
-      </button>
+      <label class="toggle-field">
+        <input
+          type="checkbox"
+          checked={snapshot.abscissaInverted}
+          on:change={(event) => onChange({ kind: 'inversion', axis: 'abscissa', inverted: (event.target as HTMLInputElement).checked })}
+        />
+        <span>Invert abscissa axis</span>
+        <SettingBadge info={badgeFor('abscissaInverted')} />
+      </label>
+      <label class="toggle-field">
+        <input
+          type="checkbox"
+          checked={snapshot.ordinateInverted}
+          on:change={(event) => onChange({ kind: 'inversion', axis: 'ordinate', inverted: (event.target as HTMLInputElement).checked })}
+        />
+        <span>Invert ordinate axis</span>
+        <SettingBadge info={badgeFor('ordinateInverted')} />
+      </label>
     </div>
   {/if}
 
   {#if activeTab === 'processing'}
     <div class="settings-card">
-      <label>
-        Normalisation mode
-        <select bind:value={normalizationMode}>
-          {#each NORMALIZATION_MODES as mode (mode.id)}
-            <option value={mode.id}>{mode.label} — {mode.description}</option>
-          {/each}
-        </select>
-      </label>
-      <p class="option-description">{describeOption(NORMALIZATION_MODES, normalizationMode)}</p>
-      <button
-        type="button"
-        class="run"
-        disabled={datasetCount === 0}
-        on:click={() => onApplyNormalization(normalizationMode)}
-      >
-        Apply normalisation to all samples
-      </button>
-
-      <div class="pipeline-params">
-        <label>
-          <span>Smoothing window</span>
-          <input type="number" min="3" step="2" bind:value={smoothingWindow} />
-        </label>
-        <label>
-          <span>Smoothing poly order</span>
-          <input type="number" min="1" bind:value={smoothingPolyorder} />
-        </label>
-      </div>
-      <button
-        type="button"
-        class="run"
-        disabled={datasetCount === 0}
-        on:click={() => onApplySmoothing(smoothingWindow, smoothingPolyorder)}
-      >
-        Apply smoothing to all samples
-      </button>
+      <PipelineEditor
+        pipeline={snapshot.pipeline}
+        onEnabled={(transformId, enabled) => {
+          const step = snapshot.pipeline.find((item) => item.id === transformId)
+          if (step) onChange({ kind: 'step', type: step.type, enabled })
+        }}
+        onParams={(transformId, params) => {
+          const step = snapshot.pipeline.find((item) => item.id === transformId)
+          if (step) onChange({ kind: 'step', type: step.type, params })
+        }}
+        badgeFor={(type) => badgeFor(pipelineKey(type))}
+      />
+    </div>
+    <div class="settings-card">
+      <ComputePrecisionSettings precision={computePrecision} onChange={onUpdateComputePrecision} />
     </div>
   {/if}
 </section>

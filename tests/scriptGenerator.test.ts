@@ -1,53 +1,57 @@
 import { describe, expect, it } from 'vitest'
-import { generatePythonScript, generatePythonFiles, PYTHON_FILE_NAMES } from '../src/services/script/scriptGenerator'
-import type { SpectrumDataset } from '../src/types/project'
+import {
+  effectivePythonFiles,
+  generatePythonFiles,
+  generatePythonScript,
+  generateSamplesJson,
+  migrateLegacyMainScript,
+  PROJECT_FILE_NAMES,
+  PYTHON_FILE_NAMES,
+} from '../src/services/script/scriptGenerator'
+import { buildDataset } from './fixtures'
 
-function buildDataset(): SpectrumDataset {
-  return {
-    id: 'sample-1',
-    name: 'Sample_01.csv',
-    sourcePath: 'Sample_01.csv',
-    spectrumType: 'uv-vis',
-    units: { x: 'nm', y: 'Absorbance' },
-    data: {
-      abscissa: [200, 201],
-      ordinateOriginal: [0.1, 0.2],
-      ordinateModified: [0.1, 0.2],
-      precision: 'float32',
-    },
-    pipeline: [
-      {
-        id: 'a',
-        type: 'smoothing',
-        scope: 'individual',
-        enabled: true,
-        params: { window_length: 15, polyorder: 2 },
-      },
-    ],
-    style: {
-      lineColor: '#ffffff',
-      lineWidth: 2,
-      scatterSymbol: 'circle',
-      label: 'Sample 01 (Processed)',
-    },
-    peaks: [],
-  }
-}
-
-describe('generatePythonScript', () => {
-  it('is deterministic for identical input', () => {
+describe('generated Python project', () => {
+  it('keeps main.py independent of sample metadata', () => {
     const one = generatePythonScript([buildDataset()])
-    const two = generatePythonScript([buildDataset()])
+    const two = generatePythonScript([buildDataset({ style: { ...buildDataset().style, label: 'Renamed' } })])
     expect(one).toBe(two)
+    expect(one).toContain("PROJECT_DIR / 'samples.json'")
+    expect(one).not.toContain('Sample 01')
   })
 
-  it('includes style values in output', () => {
-    const script = generatePythonScript([buildDataset()])
-    expect(script).toContain('\\"lineColor\\":\\"#ffffff\\"')
-    expect(script).toContain('\\"label\\":\\"Sample 01 (Processed)\\"')
-    const files = generatePythonFiles([buildDataset()])
+  it('writes sample metadata to samples.json', () => {
+    const samples = JSON.parse(generateSamplesJson([buildDataset()]))
+    expect(samples).toEqual([expect.objectContaining({
+      id: 'sample-1',
+      sourcePath: 'Sample_01.csv',
+      units: { x: 'nm', y: 'Absorbance' },
+      style: expect.objectContaining({ lineColor: '#ffffff', label: 'Sample 01 (Processed)' }),
+      peakDetection: null,
+    })])
+    expect(samples[0]).not.toHaveProperty('dataFile')
+    expect(JSON.parse(generateSamplesJson([buildDataset()], { 'sample-1': 'data/a.csv' }))[0].dataFile).toBe('data/a.csv')
+  })
+
+  it('lists every module and always regenerates samples.json', () => {
+    const files = generatePythonFiles()
     expect(Object.keys(files)).toEqual(PYTHON_FILE_NAMES)
     expect(files['ir_assignments.py']).toContain('def assign_ir_peaks(')
     expect(files['processing.py']).toContain('def process_spectrum(')
+
+    const effective = effectivePythonFiles([buildDataset()], 'print(1)', { 'processing.py': '# edited' })
+    expect(Object.keys(effective).sort()).toEqual([...PROJECT_FILE_NAMES].sort())
+    expect(effective['main.py']).toBe('print(1)')
+    expect(effective['processing.py']).toBe('# edited')
+    expect(JSON.parse(effective['samples.json'])[0].id).toBe('sample-1')
+  })
+
+  it('migrates main.py overrides that embedded the sample list', () => {
+    const legacy = 'import json\nfrom processing import process_spectrum\n\nSAMPLES = json.loads("[{\\"id\\":\\"x\\"}]")\n\n# user edit\n'
+    const migrated = migrateLegacyMainScript(legacy)
+    expect(migrated).not.toContain('json.loads(')
+    expect(migrated).toContain("with_name('samples.json')")
+    expect(migrated).toContain('SAMPLES = load_samples()')
+    expect(migrated).toContain('# user edit')
+    expect(migrateLegacyMainScript(migrated)).toBe(migrated)
   })
 })

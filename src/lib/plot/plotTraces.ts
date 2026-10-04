@@ -1,4 +1,5 @@
 import type { SpectrumDataset } from '../../types/project'
+import type { PlotSeriesMode } from '../../services/startupPreferences'
 import { formatUnit } from '../../services/spectrumPresets'
 
 export interface PlotTrace {
@@ -54,6 +55,8 @@ export function buildLineTraces(
   datasets: SpectrumDataset[],
   selectedSpectrumId: string | null,
   highlightedDatasetId: string | null,
+  lineWidthOverride?: number,
+  seriesMode: PlotSeriesMode = 'lines',
 ): PlotTrace[] {
   return datasets.map((dataset) => {
     const emphasised = dataset.id === selectedSpectrumId || dataset.id === highlightedDatasetId
@@ -62,11 +65,19 @@ export function buildLineTraces(
       x: dataset.data.abscissa,
       y: dataset.data.ordinateModified,
       type: 'scatter',
-      mode: 'lines',
+      mode: seriesMode,
       name: dataset.style.label,
       line: {
         color: dataset.style.lineColor,
-        width: dataset.id === highlightedDatasetId ? dataset.style.lineWidth + 1 : dataset.style.lineWidth,
+        width: dataset.id === highlightedDatasetId
+          ? (lineWidthOverride ?? dataset.style.lineWidth) + 1
+          : lineWidthOverride ?? dataset.style.lineWidth,
+      },
+      marker: {
+        size: 4,
+        color: dataset.style.lineColor,
+        symbol: dataset.style.scatterSymbol,
+        line: { color: dataset.style.lineColor, width: 0 },
       },
       opacity: emphasised ? 1 : 0.42,
       hovertemplate: `%{x:.6g}${unitSuffix(dataset.units.x)}<br>%{y:.6g}${unitSuffix(dataset.units.y)}<extra>${dataset.style.label}</extra>`,

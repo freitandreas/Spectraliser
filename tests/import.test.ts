@@ -50,11 +50,26 @@ describe('parseDelimited', () => {
 
     expect(collection.series[0]?.label).toBe('Absorbance')
     expect(collection.series[0]?.xUnit).toBe('nm')
-    expect(collection.series[0]?.yUnit).toBe('Absorbance')
+    expect(collection.series[0]?.yUnit).toBeUndefined()
+    expect(collection.series[0]?.yQuantity).toBe('Absorbance')
+  })
+
+  it('recognizes and standardizes Angstrom abscissa units', () => {
+    const parsed = parseDelimited('Wavelength (Å),Absorbance\n5000,0.1\n6000,0.2\n', {
+      delimiter: ',',
+      decimalSeparator: '.',
+      startRow: 0,
+      hasHeader: true,
+      xColumn: 0,
+      yColumn: 1,
+    })
+
+    expect(parsed.xUnit).toBe('Å')
+    expect(convertAbscissa(parsed.abscissa, 'Å', 'nm')).toEqual([500, 600])
   })
 
   it('detects IR headers and preserves the spectrum type when creating imported datasets', () => {
-    const parsed = parseDelimited('Wavenumber (cm^-1),Absorbance\n1000,0.5\n1100,0.6\n', {
+    const parsed = parseDelimited('Wavenumber (cm^-1),Transmittance (%)\n1000,50\n1100,60\n', {
       delimiter: ',',
       decimalSeparator: '.',
       startRow: 0,
@@ -70,9 +85,11 @@ describe('parseDelimited', () => {
     })
 
     expect(parsed.spectrumType).toBe('ir')
+    expect(parsed.xQuantity).toBe('Wavenumber')
+    expect(parsed.yQuantity).toBe('Transmittance')
     expect(dataset.spectrumType).toBe('ir')
     expect(dataset.units.x).toBe('cm^-1')
-    expect(dataset.units.y).toBe('Absorbance')
+    expect(dataset.units.y).toBe('%')
     expect(dataset.style.label).toBe('Renamed spectrum')
   })
 

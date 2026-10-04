@@ -1,28 +1,26 @@
 <script lang="ts">
   import { tick } from 'svelte'
   import ImportWizard from './lib/ImportWizard.svelte'
+  import StartupWizard from './lib/StartupWizard.svelte'
   import WorkbenchHeader from './lib/workbench/WorkbenchHeader.svelte'
   import SampleExplorer from './lib/workbench/SampleExplorer.svelte'
   import WorkspaceMain from './lib/workbench/WorkspaceMain.svelte'
   import SettingsSidebar from './lib/workbench/SettingsSidebar.svelte'
   import ConfirmDialogs from './lib/workbench/ConfirmDialogs.svelte'
-  import { importFileWithOptions } from './services/import/appImport'
-  import { downloadReport } from './services/export/downloadReport'
+  import { importFilesWithOptions } from './services/import/appImport'
+  import { downloadReport, type ExportFormat } from './services/export/downloadReport'
   import type { ImportOptions } from './services/import/parsers'
   import { projectStore } from './state/projectStore'
-  import { type NormalizationMode } from './types/project'
   import {
-    applyGlobalAxisMetadata,
-    applyGlobalLineWidth,
-    applyGlobalNormalization,
-    applyGlobalPalette,
-    applyGlobalSmoothing,
-    removeAllDatasets,
-    setAllDatasetsVisible,
-    setTransformEnabled,
-    setTransformParams,
-    type GlobalApplyContext,
-  } from './state/workbenchActions'
+    hasCompletedStartupWizard,
+    loadStartupPreferences,
+    saveStartupPreferences,
+    type StartupPreferences,
+  } from './services/startupPreferences'
+  import { computePrecision } from './state/computeSettings'
+  import { quantityNotation } from './state/displaySettings'
+  import { removeAllDatasets, setAllDatasetsVisible, setTransformEnabled, setTransformParams } from './state/workbenchActions'
+  import { applyGeneralChange, planGeneralChange, type GeneralSettingsContext } from './state/generalSettingsActions'
   import {
     beginResize,
     resolveResize,
@@ -39,13 +37,15 @@
   let importOpen = false
   let importError = ''
   let wizardFiles: File[] = []
+  let startupWizardOpen = !hasCompletedStartupWizard()
+  let startupPreferences: StartupPreferences = loadStartupPreferences()
+  $: computePrecision.set(startupPreferences.computePrecision)
+  $: quantityNotation.set(startupPreferences.plotStyle.quantityNotation)
   let exportOpen = false
-  let exportFormat: 'html' | 'csv' | 'json' = 'html'
+  let exportFormat: ExportFormat = 'html'
 
   let overwriteModalOpen = false
   let pendingGuiAction: (() => void) | null = null
-  let globalScopeModalOpen = false
-  let pendingGlobalAction: (() => void) | null = null
 
   let layoutEl: HTMLDivElement | null = null
   let workspaceMain: any = null
@@ -120,15 +120,10 @@
     const { files, options } = event.detail
 
     try {
-      for (const [index, file] of files.entries()) {
-        const error = await importFileWithOptions(file, {
-          ...options,
-          seriesLabelOverrides: options.seriesLabelOverridesByFile?.[index],
-        })
-        if (error) {
-          importError = error
-          return
-        }
+      const error = await importFilesWithOptions(files, options)
+      if (error) {
+        importError = error
+        return
       }
       importOpen = false
       wizardFiles = []
@@ -141,6 +136,40 @@
     if (files.length === 0) return
     wizardFiles = files
     importOpen = true
+  }
+
+  function completeStartupWizard(event: CustomEvent<StartupPreferences>): void {
+    const chosen = event.detail
+    // Wizard choices are explicit project-wide defaults, so every sample adopts them.
+    const direct: GeneralSettingsContext = { ...generalContext, queueGuiAction: (action) => action() }
+    queueGuiAction(() => {
+      applyGeneralChange(planGeneralChange({ kind: 'axes', axes: chosen.axes }, direct), 'all')
+      applyGeneralChange(planGeneralChange({ kind: 'lineWidth', lineWidth: chosen.plotStyle.lineWidth }, direct), 'all')
+    })
+    startupPreferences = chosen
+    saveStartupPreferences(startupPreferences)
+    startupWizardOpen = false
+  }
+
+  function persistAxes(axes: StartupPreferences['axes']): void {
+    startupPreferences = { ...startupPreferences, axes: { ...axes } }
+    saveStartupPreferences(startupPreferences)
+  }
+
+  function persistLineWidth(lineWidth: number): void {
+    updatePlotStyle({ ...startupPreferences.plotStyle, lineWidth })
+  }
+
+  $: generalContext = { axes: startupPreferences.axes, queueGuiAction, persistAxes, persistLineWidth } satisfies GeneralSettingsContext
+
+  function updatePlotStyle(plotStyle: StartupPreferences['plotStyle']): void {
+    startupPreferences = { ...startupPreferences, plotStyle }
+    saveStartupPreferences(startupPreferences)
+  }
+
+  function updateComputePrecision(precision: StartupPreferences['computePrecision']): void {
+    startupPreferences = { ...startupPreferences, computePrecision: precision }
+    saveStartupPreferences(startupPreferences)
   }
 
   function queueGuiAction(action: () => void): void {
@@ -164,10 +193,6 @@
     queueGuiAction(() => projectStore.updateDatasetMetadata(datasetId, patch as any))
   }
 
-  function convertDatasetAbscissa(datasetId: string, targetUnit: string): void {
-    queueGuiAction(() => projectStore.convertDatasetAbscissa(datasetId, targetUnit))
-  }
-
   function confirmOverwriteAndApply(): void {
     if (!pendingGuiAction) {
       overwriteModalOpen = false
@@ -185,51 +210,12 @@
     overwriteModalOpen = false
   }
 
-  function updateTransformEnabled(
-    datasetId: string,
-    transformId: string,
-    enabled: boolean,
-    scope: 'no' | 'individual' | 'global',
-  ): void {
-    setTransformEnabled(globalContext, datasetId, transformId, enabled, scope)
+  function updateTransformEnabled(datasetId: string, transformId: string, enabled: boolean): void {
+    setTransformEnabled(queueGuiAction, datasetId, transformId, enabled)
   }
 
-  function updateTransformScope(
-    datasetId: string,
-    transformId: string,
-    scope: 'no' | 'individual' | 'global',
-    snapshot: { enabled: boolean; params: Record<string, number | string | boolean> },
-  ): void {
-    if (scope === 'global') {
-      pendingGlobalAction = () => {
-        // Switching to global also pushes this step's current configuration to every sample.
-        queueGuiAction(() => projectStore.updateTransformGlobal(transformId, {
-          scope: 'global',
-          enabled: snapshot.enabled,
-          params: snapshot.params,
-        }))
-      }
-      globalScopeModalOpen = true
-      return
-    }
-
-    queueGuiAction(() => projectStore.updateTransform(datasetId, transformId, { scope }))
-  }
-
-  function updateTransformParam(
-    datasetId: string,
-    transformId: string,
-    params: Record<string, number | string | boolean>,
-    currentScope: 'no' | 'individual' | 'global',
-  ): void {
-    setTransformParams(globalContext, datasetId, transformId, params, currentScope)
-  }
-
-  function confirmGlobalScopeApply(): void {
-    const action = pendingGlobalAction
-    pendingGlobalAction = null
-    globalScopeModalOpen = false
-    action?.()
+  function updateTransformParam(datasetId: string, transformId: string, params: Record<string, number | string | boolean>): void {
+    setTransformParams(queueGuiAction, datasetId, transformId, params)
   }
 
   function confirmExport(): void {
@@ -237,22 +223,12 @@
     downloadReport(exportFormat)
   }
 
-  function cancelGlobalScopeApply(): void {
-    pendingGlobalAction = null
-    globalScopeModalOpen = false
-  }
-
-  function requestGlobalApply(action: () => void): void {
-    pendingGlobalAction = () => queueGuiAction(action)
-    globalScopeModalOpen = true
-  }
-
-  const globalContext: GlobalApplyContext = { queueGuiAction, requestGlobalApply }
-
-  function removeAllSamples(): void {
-    if ($projectStore.datasets.length === 0) return
-    if (!confirm(`Remove all ${$projectStore.datasets.length} samples?`)) return
-    removeAllDatasets()
+  function startNewSession(): void {
+    if ($projectStore.datasets.length > 0) {
+      if (!confirm(`Start a new session and remove all ${$projectStore.datasets.length} samples?`)) return
+      removeAllDatasets()
+    }
+    startupWizardOpen = true
   }
 
   function clearFileSelection(): void {
@@ -383,9 +359,9 @@
     }}
     onExport={() => { exportOpen = true }}
     datasetCount={$projectStore.datasets.length}
-    onRemoveAll={removeAllSamples}
-    onShowAll={() => setAllDatasetsVisible(globalContext, true)}
-    onHideAll={() => setAllDatasetsVisible(globalContext, false)}
+    onStartNewSession={startNewSession}
+    onShowAll={() => setAllDatasetsVisible(queueGuiAction, true)}
+    onHideAll={() => setAllDatasetsVisible(queueGuiAction, false)}
   />
 
   <div
@@ -426,6 +402,7 @@
       {bottomPanelOpen}
       {bottomPanelHeight}
       highlightedDatasetId={explorerHoverDatasetId}
+      plotStyle={startupPreferences.plotStyle}
       onClearFileSelection={clearFileSelection}
       onStartBottomResize={(event) => startResize('bottom', event)}
       onOpenSubTab={openSampleSubTab}
@@ -445,22 +422,20 @@
     <SettingsSidebar
       open={rightPanelOpen}
       dataset={rightPanelDataset}
-      datasetCount={$projectStore.datasets.length}
+      datasets={$projectStore.datasets}
+      generalSettings={$projectStore.generalSettings}
+      {generalContext}
       onClose={() => { rightPanelOpen = false }}
-      onBackToGeneral={() => { rightPanelDatasetId = null }}
       onRename={renameDataset}
       onUpdateStyle={updateDatasetStyle}
       onUpdateMetadata={updateDatasetMetadata}
-      onConvertAbscissa={convertDatasetAbscissa}
       onRerunPipeline={(datasetId) => projectStore.rerunPipeline(datasetId)}
       onTransformEnabled={updateTransformEnabled}
-      onTransformScope={updateTransformScope}
       onTransformParam={updateTransformParam}
-      onApplyPalette={(paletteId) => applyGlobalPalette(globalContext, paletteId)}
-      onApplyLineWidth={(width) => applyGlobalLineWidth(globalContext, width)}
-      onApplyNormalization={(mode: NormalizationMode) => applyGlobalNormalization(globalContext, mode)}
-      onApplySmoothing={(windowLength, polyorder) => applyGlobalSmoothing(globalContext, windowLength, polyorder)}
-      onApplyAxisMetadata={(metadata) => applyGlobalAxisMetadata(globalContext, metadata)}
+      plotStyle={startupPreferences.plotStyle}
+      onUpdatePlotStyle={updatePlotStyle}
+      computePrecision={startupPreferences.computePrecision}
+      onUpdateComputePrecision={updateComputePrecision}
     />
   </div>
 
@@ -486,6 +461,10 @@
           <input type="radio" bind:group={exportFormat} value="json" />
           JSON snapshot
         </label>
+        <label>
+          <input type="radio" bind:group={exportFormat} value="python" />
+          Python project (.zip) — current scripts, samples.json and imported data
+        </label>
       </div>
       <div class="confirm-actions">
         <button type="button" class="ghost" on:click={() => { exportOpen = false }}>Cancel</button>
@@ -498,6 +477,8 @@
 <ImportWizard
   open={importOpen}
   files={wizardFiles}
+  defaultSpectrumType={startupPreferences.spectrumType}
+  {startupPreferences}
   on:close={() => {
     importOpen = false
     wizardFiles = []
@@ -505,12 +486,14 @@
   on:import={handleImport}
 />
 
+<StartupWizard
+  open={startupWizardOpen}
+  initialPreferences={startupPreferences}
+  on:complete={completeStartupWizard}
+/>
+
 <ConfirmDialogs
   overwriteOpen={overwriteModalOpen}
-  globalScopeOpen={globalScopeModalOpen}
-  datasetCount={$projectStore.datasets.length}
   onCancelOverwrite={cancelOverwrite}
   onConfirmOverwrite={confirmOverwriteAndApply}
-  onCancelGlobal={cancelGlobalScopeApply}
-  onConfirmGlobal={confirmGlobalScopeApply}
 />

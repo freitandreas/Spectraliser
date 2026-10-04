@@ -1,22 +1,48 @@
 import { canonicalUnit } from '../spectrumPresets'
 
-export type ConvertibleAbscissaUnit = 'm' | 'cm' | 'mm' | 'µm' | 'um' | 'nm' | 'cm^-1' | '1/cm'
+export type ConvertibleAbscissaUnit = 'm' | 'cm' | 'mm' | 'µm' | 'um' | 'nm' | 'cm^-1' | '1/cm' | 'Hz' | 'eV' | 'Å' | 's'
+
+const SPEED_OF_LIGHT_M_S = 299_792_458
+const HC_EV_NM = 1239.8419843320026
 
 function normalizeUnit(unit: string): ConvertibleAbscissaUnit | null {
   const normalized = canonicalUnit(unit).toLowerCase().replaceAll(' ', '')
-  if (normalized === 'm' || normalized === 'cm' || normalized === 'mm' || normalized === 'µm'
-    || normalized === 'um' || normalized === 'nm' || normalized === 'cm^-1' || normalized === '1/cm') {
-    return normalized
-  }
+  if (['m', 'cm', 'mm', 'µm', 'um', 'nm'].includes(normalized)) return normalized as ConvertibleAbscissaUnit
+  if (['cm^-1', '1/cm'].includes(normalized)) return normalized as ConvertibleAbscissaUnit
+  if (normalized === 'hz') return 'Hz'
+  if (normalized === 'ev') return 'eV'
+  if (['å', 'angstrom', 'angstroms'].includes(normalized)) return 'Å'
+  if (normalized === 's') return 's'
   return null
 }
 
 function toNanometres(value: number, unit: ConvertibleAbscissaUnit): number {
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new Error('Abscissa conversions require finite, positive wavelength, wavenumber, frequency, or energy values.')
+  }
   if (unit === 'm') return value * 1e9
   if (unit === 'cm') return value * 1e7
   if (unit === 'mm') return value * 1e6
   if (unit === 'µm' || unit === 'um') return value * 1e3
-  return value
+  if (unit === 'nm') return value
+  if (unit === 'cm^-1' || unit === '1/cm') return 1e7 / value
+  if (unit === 'Hz') return (SPEED_OF_LIGHT_M_S * 1e9) / value
+  if (unit === 'Å') return value / 10
+  if (unit === 's') throw new Error('Time is not convertible to wavelength, frequency, or spectral energy.')
+  return HC_EV_NM / value
+}
+
+function fromNanometres(value: number, unit: ConvertibleAbscissaUnit): number {
+  if (unit === 'm') return value / 1e9
+  if (unit === 'cm') return value / 1e7
+  if (unit === 'mm') return value / 1e6
+  if (unit === 'µm' || unit === 'um') return value / 1e3
+  if (unit === 'nm') return value
+  if (unit === 'cm^-1' || unit === '1/cm') return 1e7 / value
+  if (unit === 'Hz') return (SPEED_OF_LIGHT_M_S * 1e9) / value
+  if (unit === 'Å') return value * 10
+  if (unit === 's') throw new Error('Time is not convertible to wavelength, frequency, or spectral energy.')
+  return HC_EV_NM / value
 }
 
 export function convertAbscissa(values: number[], fromUnit: string, toUnit: string): number[] {
@@ -28,21 +54,7 @@ export function convertAbscissa(values: number[], fromUnit: string, toUnit: stri
   if (from === to || (from === 'µm' && to === 'um') || (from === 'um' && to === 'µm')) {
     return [...values]
   }
-
-  const fromWavenumber = from === 'cm^-1' || from === '1/cm'
-  const toWavenumber = to === 'cm^-1' || to === '1/cm'
-  if (fromWavenumber !== toWavenumber) {
-    return values.map((value) => {
-      if (value === 0) throw new Error('Cannot convert a zero wavelength or wavenumber')
-      return fromWavenumber
-        ? 1e7 / value
-        : 1e7 / toNanometres(value, from)
-    })
-  }
-
-  if (fromWavenumber && toWavenumber) return [...values]
-
-  return values.map((value) => toNanometres(value, from) / toNanometres(1, to))
+  return values.map((value) => fromNanometres(toNanometres(value, from), to))
 }
 
 export function canConvertAbscissa(fromUnit: string, toUnit: string): boolean {

@@ -1,10 +1,20 @@
 """CSV loading and standalone result serialization."""
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 
 
-def load_sample_dataframe(meta):
-    frame = pd.read_csv(meta['sourcePath'])
+def sample_data_path(meta, base_dir=None):
+    """Exported projects store the measurement in dataFile; older ones only have sourcePath."""
+    path = Path(meta.get('dataFile') or meta['sourcePath'])
+    if base_dir is not None and not path.is_absolute():
+        path = Path(base_dir) / path
+    return path
+
+
+def load_sample_dataframe(meta, base_dir=None):
+    frame = pd.read_csv(sample_data_path(meta, base_dir))
     numeric = frame.select_dtypes(include=[np.number])
     if numeric.shape[1] < 2:
         raise ValueError(f"Sample {meta.get('name', 'unknown')} needs two numeric columns")
@@ -14,12 +24,12 @@ def load_sample_dataframe(meta):
     })
 
 
-def process_all_samples(samples, processor):
+def process_all_samples(samples, processor, base_dir=None):
     from ir_assignments import assign_ir_peaks
 
     results = []
     for meta in samples:
-        original = load_sample_dataframe(meta)
+        original = load_sample_dataframe(meta, base_dir)
         processed, output_meta = processor(original, meta)
         if not isinstance(processed, pd.DataFrame):
             processed = pd.DataFrame(processed)

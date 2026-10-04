@@ -8,9 +8,19 @@
     type ImportOptions,
     type ParsedSpectrumSeries,
   } from '../services/import/parsers'
+  import type { SpectrumType } from '../types/project'
+  import {
+    DEFAULT_STARTUP_PREFERENCES,
+    axisDefaultsForPreference,
+    type StartupPreferences,
+  } from '../services/startupPreferences'
+  import ImportMetadataSettings from './ImportMetadataSettings.svelte'
+  import ImportDataPreview from './ImportDataPreview.svelte'
 
   export let open = false
   export let files: File[] = []
+  export let defaultSpectrumType: SpectrumType = 'uv-vis'
+  export let startupPreferences: StartupPreferences = DEFAULT_STARTUP_PREFERENCES
 
   const dispatch = createEventDispatcher<{
     close: undefined
@@ -25,8 +35,22 @@
   let seriesLabelsByFile: Record<number, string[]> = {}
   let loadingPreview = false
   let previewError = ''
-
-  const previewPalette = ['#4fc1ff', '#78d08f', '#f5b83d', '#f08bd9', '#ff8f70', '#a9a2ff']
+  let wasOpen = false
+  let metadataTouched = false
+  let previewGeneration = 0
+  $: if (open && !wasOpen) {
+    options = {
+      ...defaultImportOptions,
+      spectrumType: defaultSpectrumType,
+      axisMetadata: axesForType(defaultSpectrumType),
+    }
+    seriesLabelsByFile = {}
+    metadataTouched = false
+    wasOpen = true
+  }
+  $: if (!open) wasOpen = false
+  let metadataValid = true
+  $: canSubmit = files.length > 0 && metadataValid && !loadingPreview
 
   $: if (activeIndex >= files.length) {
     activeIndex = files.length > 0 ? files.length - 1 : 0
@@ -40,6 +64,10 @@
 
   $: if (open && files.length > 0 && previewDependency.length > 0) {
     void refreshPreview()
+  }
+
+  function axesForType(type: SpectrumType): NonNullable<ImportOptions['axisMetadata']> {
+    return type === startupPreferences.spectrumType ? { ...startupPreferences.axes } : axisDefaultsForPreference(type)
   }
 
   function handleBackdropKeydown(event: KeyboardEvent): void {
@@ -78,12 +106,14 @@
   }
 
   async function refreshPreview(): Promise<void> {
+    const generation = ++previewGeneration
     const file = files[activeIndex]
     if (!file) {
       tableRows = []
       seriesPreview = []
       seriesLabels = []
       previewError = ''
+      loadingPreview = false
       return
     }
 
@@ -92,25 +122,32 @@
 
     try {
       const rows = await readRows(file)
-      tableRows = rows.slice(0, 40)
+      if (generation !== previewGeneration) return
+      tableRows = rows
 
       const collection = file.name.toLowerCase().endsWith('.xlsx')
         ? parseXlsxCollection(await file.arrayBuffer(), options)
         : parseDelimitedCollection(await file.text(), options)
+      if (generation !== previewGeneration) return
       seriesPreview = collection.series
-      seriesLabels = collection.series.map((series, index) => seriesLabelsByFile[activeIndex]?.[index] ?? series.label)
+      const fileLabel = file.name.replace(/\.[^.]+$/, '').replaceAll('_', ' ').trim() || file.name
+      const fallbackLabel = (index: number) => collection.series.length > 1 ? `${fileLabel} — ${index + 1}` : fileLabel
+      seriesLabels = collection.series.map((series, index) => seriesLabelsByFile[activeIndex]?.[index] ?? (
+        options.hasHeader && series.label.trim() ? series.label : fallbackLabel(index)
+      ))
       seriesLabelsByFile = { ...seriesLabelsByFile, [activeIndex]: seriesLabels }
     } catch (error) {
+      if (generation !== previewGeneration) return
       previewError = error instanceof Error ? error.message : 'Preview failed'
       seriesPreview = []
       tableRows = []
     } finally {
-      loadingPreview = false
+      if (generation === previewGeneration) loadingPreview = false
     }
   }
 
   function submitImport(): void {
-    if (files.length === 0) {
+    if (!canSubmit) {
       return
     }
 
@@ -120,28 +157,6 @@
     })
   }
 
-  function buildPolyline(series: ParsedSpectrumSeries): string {
-    const x = series.abscissa
-    const y = series.ordinate
-    if (x.length === 0 || y.length === 0) {
-      return ''
-    }
-
-    const minX = Math.min(...x)
-    const maxX = Math.max(...x)
-    const minY = Math.min(...y)
-    const maxY = Math.max(...y)
-    const spanX = maxX - minX || 1
-    const spanY = maxY - minY || 1
-
-    return x
-      .map((value, index) => {
-        const px = 20 + ((value - minX) / spanX) * 760
-        const py = 210 - ((y[index] - minY) / spanY) * 180
-        return `${px},${py}`
-      })
-      .join(' ')
-  }
 </script>
 
 {#if open}
@@ -222,8 +237,17 @@
 
         <label>
           Spectrum Type
-          <select bind:value={options.spectrumType}>
-            <option value="auto">Auto-detect</option>
+          <select
+            value={options.spectrumType}
+            on:change={(event) => {
+              const type = (event.target as HTMLSelectElement).value as SpectrumType
+              options = {
+                ...options,
+                spectrumType: type,
+                          axisMetadata: metadataTouched ? options.axisMetadata : axesForType(type),
+              }
+            }}
+          >
             <option value="uv-vis">UV-Vis</option>
             <option value="ir">IR</option>
             <option value="raman">Raman</option>
@@ -236,59 +260,23 @@
         </label>
       </div>
 
-      <div class="preview-shell">
-        <div class="preview-table-wrap" style={`--row-accent:${previewPalette[0]};`}>
-          <h3>Table Preview</h3>
-          <div class="wizard-table-scroll">
-            <table class="preview-table">
-              <tbody>
-                {#each tableRows as row, rowIndex (rowIndex)}
-                  <tr>
-                    {#each row as cell, cellIndex (cellIndex)}
-                      <td>{cell}</td>
-                    {/each}
-                  </tr>
-                {/each}
-              </tbody>
-            </table>
-          </div>
-        </div>
+      <ImportMetadataSettings
+        {options}
+        {seriesPreview}
+        bind:valid={metadataValid}
+        on:change={(event) => { options = event.detail }}
+        on:metadatachange={() => { metadataTouched = true }}
+      />
 
-        <div class="preview-plot-wrap">
-          <h3>Plot Preview</h3>
-          <svg class="preview-plot" viewBox="0 0 800 230" role="img" aria-label="Import preview plot">
-            <rect x="0" y="0" width="800" height="230" fill="#15171b"></rect>
-            {#each seriesPreview as series, index (series.label + index)}
-              <polyline
-                fill="none"
-                stroke={previewPalette[index % previewPalette.length]}
-                stroke-width="2"
-                points={buildPolyline(series)}
-              />
-            {/each}
-          </svg>
-          <div class="series-legend">
-            {#each seriesPreview as series, index (series.label + index)}
-              <label class="legend-item">
-                <span
-                  class="legend-dot"
-                  style={`background:${previewPalette[index % previewPalette.length]};`}
-                ></span>
-                <input
-                  type="text"
-                  aria-label={`Series ${index + 1} name`}
-                  value={seriesLabels[index] ?? series.label}
-                  on:input={(event) => {
-                    seriesLabels[index] = (event.target as HTMLInputElement).value
-                    seriesLabels = seriesLabels
-                    seriesLabelsByFile = { ...seriesLabelsByFile, [activeIndex]: seriesLabels }
-                  }}
-                />
-              </label>
-            {/each}
-          </div>
-        </div>
-      </div>
+      <ImportDataPreview
+        tableRows={tableRows}
+        series={seriesPreview}
+        labels={seriesLabels}
+        on:labelchange={(event) => {
+          seriesLabels = event.detail
+          seriesLabelsByFile = { ...seriesLabelsByFile, [activeIndex]: seriesLabels }
+        }}
+      />
 
       {#if loadingPreview}
         <div class="status">Refreshing preview...</div>
@@ -299,7 +287,7 @@
 
       <footer>
         <div class="file-label">{files.length} file(s) queued</div>
-        <button type="button" class="run" disabled={files.length === 0} on:click={submitImport}>
+        <button type="button" class="run" disabled={!canSubmit} on:click={submitImport}>
           Import Files
         </button>
       </footer>
@@ -336,8 +324,7 @@
     gap: 12px;
   }
 
-  h2,
-  h3 {
+  h2 {
     margin: 0;
     font-size: 1rem;
   }
@@ -398,89 +385,6 @@
     justify-self: start;
   }
 
-  .preview-shell {
-    display: grid;
-    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
-    gap: 12px;
-  }
-
-  .preview-table-wrap,
-  .preview-plot-wrap {
-    border: 1px solid #3f3f46;
-    border-radius: 8px;
-    padding: 10px;
-    background: #1a1b1f;
-    min-height: 0;
-  }
-
-  .wizard-table-scroll {
-    max-height: 260px;
-    overflow: auto;
-    margin-top: 8px;
-  }
-
-  .preview-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.8rem;
-  }
-
-  .preview-table td {
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-    padding: 6px;
-    color: #d4d4d4;
-  }
-
-  .preview-table tr:nth-child(odd) {
-    background: color-mix(in srgb, var(--row-accent) 12%, transparent);
-  }
-
-  .preview-table tr:nth-child(even) {
-    background: color-mix(in srgb, var(--row-accent) 5%, transparent);
-  }
-
-  .preview-plot {
-    width: 100%;
-    height: 230px;
-    border-radius: 6px;
-    margin-top: 8px;
-  }
-
-  .series-legend {
-    margin-top: 8px;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    color: #9da0a5;
-    font-size: 0.78rem;
-  }
-
-  .legend-item {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-  }
-
-  .legend-item input {
-    width: 150px;
-    padding: 4px 6px;
-    font-size: 0.78rem;
-  }
-
-  .legend-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    flex: 0 0 auto;
-  }
-
-  .legend-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    flex: 0 0 auto;
-  }
-
   .status {
     margin-top: 10px;
     color: #9da0a5;
@@ -516,24 +420,20 @@
     font-size: 0.82rem;
   }
 
-  .wizard-table-scroll,
   .modal {
     scrollbar-width: thin;
     scrollbar-color: #4a5f72 #1a1b1f;
   }
 
-  .wizard-table-scroll::-webkit-scrollbar,
   .modal::-webkit-scrollbar {
     width: 10px;
     height: 10px;
   }
 
-  .wizard-table-scroll::-webkit-scrollbar-track,
   .modal::-webkit-scrollbar-track {
     background: #1a1b1f;
   }
 
-  .wizard-table-scroll::-webkit-scrollbar-thumb,
   .modal::-webkit-scrollbar-thumb {
     background: #4a5f72;
     border-radius: 8px;
@@ -545,9 +445,6 @@
       grid-template-columns: 1fr 1fr;
     }
 
-    .preview-shell {
-      grid-template-columns: 1fr;
-    }
   }
 
   @media (max-width: 640px) {

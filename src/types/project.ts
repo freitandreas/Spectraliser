@@ -1,3 +1,6 @@
+import type { ProjectGeneralSettings } from '../services/generalSettings'
+import type { SeriesCoordinate } from '../services/seriesCoordinates'
+
 export type SpectrumType = 'uv-vis' | 'ir' | 'raman'
 
 export type TransformScope = 'no' | 'individual' | 'global'
@@ -78,6 +81,8 @@ export interface SpectrumDataset {
   style: SpectrumStyle
   peaks: Peak[]
   peakDetection?: PeakDetectionOptions
+  /** User-entered series coordinate (e.g. measurement time); overrides values parsed from the label. */
+  seriesCoordinate?: SeriesCoordinate | null
 }
 
 export interface ViewState {
@@ -94,6 +99,8 @@ export interface AppState {
   updatedAt: string
   datasets: SpectrumDataset[]
   projectSpectrumType?: SpectrumType | null
+  /** Values samples follow unless they were given their own; absent in projects saved before 1.2. */
+  generalSettings?: ProjectGeneralSettings
   viewState: ViewState
   scriptSyncEnabled: boolean
   syncMode: SyncMode

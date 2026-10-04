@@ -1,7 +1,8 @@
 import { projectStore } from '../../state/projectStore'
 import { generateSelfContainedHtmlReport } from './htmlReport'
+import { createPythonProjectArchive } from './pythonProject'
 
-export type ExportFormat = 'html' | 'csv' | 'json'
+export type ExportFormat = 'html' | 'csv' | 'json' | 'python'
 
 function sanitizeFilename(value: string): string {
   return value.trim().replace(/[^a-zA-Z0-9._-]+/g, '_') || 'spectraliser_export'
@@ -10,7 +11,7 @@ function sanitizeFilename(value: string): string {
 function buildCsvReport(state: ReturnType<typeof projectStore.snapshot>): string {
   const rows = state.datasets.map((dataset) => {
     const abscissaValues = dataset.data.abscissa
-    const ordinateValues = dataset.data.ordinateModified
+    const ordinateValues = dataset.data.ordinateModified.filter(Number.isFinite)
     const minX = abscissaValues.length ? Math.min(...abscissaValues) : ''
     const maxX = abscissaValues.length ? Math.max(...abscissaValues) : ''
     const minY = ordinateValues.length ? Math.min(...ordinateValues) : ''
@@ -46,6 +47,10 @@ export function downloadReport(format: ExportFormat = 'html'): void {
     blob = new Blob([buildCsvReport(state)], { type: 'text/csv;charset=utf-8' })
     filename = `${filenameBase}.csv`
     mimeType = 'text/csv;charset=utf-8'
+  } else if (format === 'python') {
+    blob = new Blob([createPythonProjectArchive(state)], { type: 'application/zip' })
+    filename = `${filenameBase}_python.zip`
+    mimeType = 'application/zip'
   } else if (format === 'json') {
     blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json;charset=utf-8' })
     filename = `${filenameBase}.json`

@@ -7,7 +7,7 @@ export const defaultImportOptions: ImportOptions = {
   hasHeader: true,
   xColumn: 0,
   yColumn: 1,
-  spectrumType: 'auto',
+  spectrumType: 'uv-vis',
 }
 
 export function validateImportOptions(options: ImportOptions): string[] {

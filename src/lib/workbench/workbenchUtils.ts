@@ -23,12 +23,7 @@ export function describeOption(options: DescribedOption[], id: string): string {
   return options.find((option) => option.id === id)?.description ?? ''
 }
 
-export const COLOR_PALETTES: Array<{ id: string; name: string; colors: string[] }> = [
-  { id: 'default', name: 'Default Blue', colors: ['#4fc1ff', '#8ea0b4', '#8bd17c', '#f2c14e', '#e57373'] },
-  { id: 'ocean', name: 'Ocean', colors: ['#0f5e9c', '#1c7ed6', '#3bc9db', '#66d9e8', '#a5f3fc'] },
-  { id: 'sunset', name: 'Sunset', colors: ['#ff6b6b', '#ff922b', '#ffd43b', '#f76707', '#e64980'] },
-  { id: 'mono', name: 'Monochrome', colors: ['#e6e6e6', '#bfbfbf', '#999999', '#737373', '#4d4d4d'] },
-]
+export { COLOR_PALETTES } from '../../services/palettes'
 
 export function makeSampleTabId(datasetId: string, subView: SampleSubView): string {
   return `${datasetId}::${subView}`

@@ -1,11 +1,15 @@
 <script lang="ts">
+  import {
+    describeAffected,
+    pendingGeneralChange,
+    resolvePendingGeneralChange,
+  } from '../../state/generalSettingsActions'
+
   export let overwriteOpen: boolean
-  export let globalScopeOpen: boolean
-  export let datasetCount: number
   export let onCancelOverwrite: () => void
   export let onConfirmOverwrite: () => void
-  export let onCancelGlobal: () => void
-  export let onConfirmGlobal: () => void
+
+  $: plan = $pendingGeneralChange
 </script>
 
 {#if overwriteOpen}
@@ -23,16 +27,22 @@
   </div>
 {/if}
 
-{#if globalScopeOpen}
+{#if plan}
   <div class="confirm-backdrop" role="presentation">
-    <div class="confirm-modal" role="dialog" aria-modal="true" aria-label="Global transform warning">
-      <h3>Apply To All Spectra?</h3>
+    <div class="confirm-modal" role="dialog" aria-modal="true" aria-label="Update general setting">
+      <h3>Update general setting</h3>
       <p>
-        Warning: You are about to override transformation settings for {datasetCount} loaded spectra. Continue?
+        <b>{describeAffected(plan)}</b>:
+        {plan.deviatorCount} {plan.deviatorCount === 1 ? 'sample uses' : 'samples use'} its own value.
+        Overwrite every sample, or only update the {plan.followerCount}
+        {plan.followerCount === 1 ? 'sample' : 'samples'} that follow the general setting?
       </p>
       <div class="confirm-actions">
-        <button type="button" class="ghost" on:click={onCancelGlobal}>Cancel</button>
-        <button type="button" class="run" on:click={onConfirmGlobal}>Continue</button>
+        <button type="button" class="ghost" on:click={() => resolvePendingGeneralChange(null)}>Cancel</button>
+        <button type="button" class="ghost" on:click={() => resolvePendingGeneralChange('followers')}>
+          Only following samples ({plan.followerCount})
+        </button>
+        <button type="button" class="run" on:click={() => resolvePendingGeneralChange('all')}>Overwrite all samples</button>
       </div>
     </div>
   </div>

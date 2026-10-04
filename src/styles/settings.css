@@ -1,0 +1,149 @@
+.settings-scope-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  overflow: hidden;
+}
+
+.settings-scope-toggle button {
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 4px 12px;
+  cursor: pointer;
+}
+
+.settings-scope-toggle button + button {
+  border-left: 1px solid var(--border);
+}
+
+.settings-scope-toggle button.current {
+  color: #eaf4ff;
+  background: rgba(0, 122, 204, 0.3);
+}
+
+.setting-label-row {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.setting-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid rgba(242, 193, 78, 0.55);
+  border-radius: 999px;
+  background: rgba(242, 193, 78, 0.12);
+  color: #f2c14e;
+  font-size: 0.66rem;
+  font-weight: 600;
+  line-height: 1;
+  padding: 2px 6px;
+}
+
+.setting-badge-action {
+  border: 0;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  color: inherit;
+  font-size: 0.68rem;
+  line-height: 1;
+  padding: 2px 5px;
+  cursor: pointer;
+}
+
+.setting-badge-action:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.general-deviation-link {
+  justify-self: start;
+  border: 0;
+  background: transparent;
+  color: #f2c14e;
+  font-size: 0.8rem;
+  text-align: left;
+  text-decoration: underline;
+  padding: 0;
+  cursor: pointer;
+}
+
+.settings-error {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 8px;
+  border: 1px solid rgba(229, 115, 115, 0.6);
+  border-radius: 6px;
+  background: rgba(229, 115, 115, 0.12);
+  color: #f3b0b0;
+  font-size: 0.76rem;
+  white-space: pre-line;
+  padding: 6px 8px;
+}
+
+.differences-modal {
+  width: min(960px, 94vw);
+  max-width: none;
+}
+
+.differences-scroll {
+  max-height: 60vh;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.differences-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.76rem;
+}
+
+.differences-table th,
+.differences-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 5px 8px;
+  text-align: left;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.differences-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+  color: var(--text-dim);
+  z-index: 1;
+}
+
+.differences-table tbody th {
+  font-weight: 600;
+}
+
+.differences-table .general-row {
+  background: rgba(0, 122, 204, 0.12);
+}
+
+.differences-table td {
+  color: var(--text-dim);
+}
+
+.differences-table td.differs {
+  background: rgba(242, 193, 78, 0.14);
+  color: #f2c14e;
+}
+
+.differences-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  margin-right: 6px;
+  vertical-align: middle;
+}

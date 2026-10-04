@@ -1,7 +1,8 @@
 <script lang="ts">
+  import QuantityLabel from '../QuantityLabel.svelte'
   import PeakHeatmap from '../PeakHeatmap.svelte'
   import { projectStore } from '../../state/projectStore'
-  import { formatUnit } from '../../services/spectrumPresets'
+  import { peakSingleSeriesView } from '../../state/displaySettings'
 
   export let dataset: any
   export let peakHoverSelection: { datasetId: string; peakId: string } | null
@@ -54,9 +55,9 @@
   }
 
   function buildHeatmapAxisValues(): { prominenceValues: number[]; distanceValues: number[] } {
-    const values = dataset.data.ordinateModified
-    const min = Math.min(...values)
-    const max = Math.max(...values)
+    const values = dataset.data.ordinateModified.filter(Number.isFinite)
+    const min = values.length ? Math.min(...values) : 0
+    const max = values.length ? Math.max(...values) : 0
     const range = Math.max(max - min, 1e-6)
 
     return {
@@ -137,7 +138,17 @@
 >
   <div class="peak-table-col">
     <div class="peak-table-heading">
-      <h3>Peak Assignments</h3>
+      <div class="peak-table-title">
+        <h3>Peak Assignments</h3>
+        <button
+          type="button"
+          class="peak-series-toggle"
+          class:active={$peakSingleSeriesView}
+          aria-pressed={$peakSingleSeriesView}
+          title="Plot only this series as a 2D spectrum with its peaks, whatever the plot mode"
+          on:click={() => peakSingleSeriesView.update((value) => !value)}
+        >Only this series</button>
+      </div>
       <p class="peak-assignment-note">Click on the trace in the plot above to add a peak manually.</p>
     </div>
     {#if dataset.peaks.length === 0}
@@ -147,8 +158,8 @@
         <table class="sample-table" style={`--row-accent:${dataset.style.lineColor};`}>
           <thead>
             <tr>
-              <th><i>{dataset.units.xQuantity}</i>{#if dataset.units.x} / {formatUnit(dataset.units.x)}{/if}</th>
-              <th><i>{dataset.units.yQuantity}</i>{#if dataset.units.y} / {formatUnit(dataset.units.y)}{/if}</th>
+              <th><QuantityLabel quantity={dataset.units.xQuantity ?? 'Abscissa'} unit={dataset.units.x} /></th>
+              <th><QuantityLabel quantity={dataset.units.yQuantity ?? 'Ordinate'} unit={dataset.units.y} /></th>
               <th>Prominence</th>
               <th>Intensity</th>
               <th>Label</th>

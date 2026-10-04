@@ -2,55 +2,111 @@ import { get } from 'svelte/store'
 import { transitionSyncState } from '../services/script/syncStateMachine'
 import { effectivePythonFiles, type PythonFileName } from '../services/script/scriptGenerator'
 import { appState, workerClient, scheduleAutosave, regenerateScript, logScriptDebug, appendScriptOutput } from './projectContext'
-import { mergeAssignedPeaks, shouldApplyAssignedPeaks } from './peakMerge'
+import { computePrecision } from './computeSettings'
+import { ExecutionCache, scriptExecutionKey } from './executionCache'
+import { applyScriptResult } from './scriptResult'
+import { buildRunScript, runnerMetadata, runnerScriptFiles } from '../services/script/runScript'
 
+export interface ScriptExecutionOptions {
+  /** Report in the output panel when every sample is already up to date. */
+  announceSkip?: boolean
+}
+
+interface ScriptExecutionRequest {
+  datasetIds?: string[]
+  options: ScriptExecutionOptions
+}
+
+const executionCache = new ExecutionCache()
 let activeScriptExecution: Promise<void> | null = null
-let latestPendingScript: { scriptCode: string; datasetIds?: string[] } | null = null
+let latestPendingScript: ScriptExecutionRequest | null = null
 
-export function executeScriptForDatasets(scriptCode: string, datasetIds?: string[]): Promise<void> {
+/**
+ * Runs the script for every visible sample whose script inputs changed since its
+ * applied result. Requests arriving during a run collapse into one follow-up run.
+ */
+export function executeScriptForDatasets(
+  datasetIds?: string[],
+  options: ScriptExecutionOptions = {},
+): Promise<void> {
   if (activeScriptExecution) {
-    latestPendingScript = { scriptCode, datasetIds }
+    latestPendingScript = { datasetIds, options }
     return activeScriptExecution
   }
 
-  const execution = runScriptExecution(scriptCode, datasetIds)
+  const execution = runScriptExecution({ datasetIds, options })
   activeScriptExecution = execution
-  void execution.then(() => {
+  const runPending = () => {
     activeScriptExecution = null
     const pending = latestPendingScript
     latestPendingScript = null
-    if (pending) void executeScriptForDatasets(pending.scriptCode, pending.datasetIds)
-  }, () => {
-    activeScriptExecution = null
-    const pending = latestPendingScript
-    latestPendingScript = null
-    if (pending) void executeScriptForDatasets(pending.scriptCode, pending.datasetIds)
-  })
+    if (pending) void executeScriptForDatasets(pending.datasetIds, pending.options)
+  }
+  void execution.then(runPending, runPending)
   return execution
 }
 
-async function runScriptExecution(scriptCode: string, datasetIds?: string[]): Promise<void> {
+/** Forces the next run for one sample, e.g. after peak detection replaced its script-assigned peaks. */
+export function invalidateScriptResult(datasetId: string): void {
+  executionCache.forget(datasetId)
+}
+
+/** Forgets applied results, e.g. when a new session starts. */
+export function resetScriptExecutionCache(): void {
+  executionCache.clear()
+}
+
+function finishExecution(appliedCount: number, total: number, errors: string[]): void {
+  appState.update((current) => ({
+    ...current,
+    workerBusy: false,
+    workerLastError: errors.length > 0
+      ? `Script applied to ${appliedCount}/${total} samples. First error: ${errors[0]}`
+      : null,
+    scriptProgress: {
+      active: false,
+      completed: appliedCount,
+      total,
+      message: errors.length > 0 ? 'Execution finished with errors' : 'Execution finished',
+    },
+  }))
+  appendScriptOutput(errors.length > 0
+    ? `Execution finished with errors (${appliedCount}/${total} samples applied).`
+    : `Execution finished successfully (${appliedCount} sample${appliedCount === 1 ? '' : 's'} applied).`)
+}
+
+async function runScriptExecution({ datasetIds, options }: ScriptExecutionRequest): Promise<void> {
   const state = get(appState)
-  const selected = state.datasets.filter((item) =>
+  const precision = get(computePrecision)
+  const scriptFiles = runnerScriptFiles(effectivePythonFiles(state.datasets, state.generatedScript, state.pythonFileOverrides ?? {}))
+  executionCache.retainOnly(state.datasets.map((item) => item.id))
+
+  const candidates = state.datasets.filter((item) =>
     item.style.visible !== false
     && (!datasetIds || datasetIds.length === 0 || datasetIds.includes(item.id)),
   )
+  const selected = candidates
+    .map((dataset) => ({ dataset, key: scriptExecutionKey(dataset, scriptFiles, precision) }))
+    .filter(({ dataset, key }) => !executionCache.isCurrent(dataset.id, key))
 
   if (selected.length === 0) {
+    if (options.announceSkip && candidates.length > 0) {
+      appendScriptOutput('All visible samples are up to date; nothing to execute.')
+    }
     return
   }
 
+  const sampleIds = selected.map(({ dataset }) => dataset.id)
+  const labels = new Map(selected.map(({ dataset }) => [dataset.id, dataset.style.label]))
+  const keys = new Map(selected.map(({ dataset, key }) => [dataset.id, key]))
   logScriptDebug('execute_script_start', {
     selectedCount: selected.length,
-    scriptLength: scriptCode.length,
-    datasetIds: selected.map((item) => item.id),
-    labels: selected.map((item) => item.style.label),
-    pipelineLengths: selected.map((item) => item.pipeline.length),
+    skippedCount: candidates.length - selected.length,
+    datasetIds: sampleIds,
+    precision,
     syncMode: state.syncMode,
-    scriptSyncEnabled: state.scriptSyncEnabled,
-    userOverrideActive: state.userScriptOverride !== null,
   })
-  appendScriptOutput(`Starting script execution for ${selected.length} sample${selected.length === 1 ? '' : 's'}.`)
+  appendScriptOutput(`Running processing for ${selected.length} changed sample${selected.length === 1 ? '' : 's'} (${precision}); ${candidates.length - selected.length} unchanged skipped.`)
 
   appState.update((current) => ({
     ...current,
@@ -60,160 +116,77 @@ async function runScriptExecution(scriptCode: string, datasetIds?: string[]): Pr
       active: true,
       completed: 0,
       total: selected.length,
-      message: 'Preparing script execution',
+      message: `Processing ${selected.length} sample${selected.length === 1 ? '' : 's'}`,
     },
   }))
 
   let appliedCount = 0
-  const datasetErrors: string[] = []
-
-  for (const dataset of selected) {
-    appState.update((current) => ({
-      ...current,
-      scriptProgress: {
-        ...current.scriptProgress,
-        message: `Processing ${dataset.style.label}`,
-      },
-    }))
-    try {
-      const response = await workerClient.executeScript({
-        spectrumId: dataset.id,
+  const errors: string[] = []
+  try {
+    const response = await workerClient.executeBatch({
+      runScript: buildRunScript(sampleIds),
+      scriptFiles,
+      samples: selected.map(({ dataset }) => ({
+        id: dataset.id,
         abscissa: dataset.data.abscissa,
         ordinate: dataset.data.ordinateOriginal,
-        metadata: {
-          name: dataset.name,
-          sourcePath: dataset.sourcePath,
-          spectrumType: dataset.spectrumType,
-          pipeline: dataset.pipeline,
-          units: {
-            x: dataset.units.x,
-            y: dataset.units.y,
-          },
-          style: {
-            label: dataset.style.label,
-            lineColor: dataset.style.lineColor,
-            lineWidth: dataset.style.lineWidth,
-            scatterSymbol: dataset.style.scatterSymbol,
-            visible: dataset.style.visible,
-          },
-          peakDetectionMode: dataset.peakDetection?.mode ?? 'maxima',
-          peakDetection: dataset.peakDetection ?? {
-            prominence: 0.01,
-            minDistance: 1,
-            minHeight: null,
-            mode: 'maxima',
-          },
-        },
-        scriptCode,
-        scriptFiles: effectivePythonFiles(state.datasets, state.generatedScript, {
-          ...state.pythonFileOverrides,
-          'main.py': scriptCode,
-        }),
-        preferFloat32: true,
-      })
+        metadata: runnerMetadata(dataset),
+      })),
+      preferFloat32: precision === 'float32',
+    })
+    if (response.type !== 'batch_result') {
+      const message = response.type === 'error' ? response.message : `worker returned ${response.type}`
+      errors.push(message)
+      appendScriptOutput(`Execution failed: ${message}`)
+      return
+    }
 
-      if (response.type !== 'result') {
-        logScriptDebug('execute_script_non_result', {
-          spectrumId: dataset.id,
-          responseType: response.type,
-        })
-        datasetErrors.push(`${dataset.style.label}: ${response.type}`)
-        appendScriptOutput(`${dataset.style.label}: worker returned ${response.type}.`)
+    for (const result of response.results) {
+      const label = labels.get(result.id) ?? result.id
+      if ('error' in result) {
+        errors.push(`${label}: ${result.error}`)
+        appendScriptOutput(`${label}: ${result.error}`)
         continue
       }
-
-      logScriptDebug('execute_script_result', {
-        spectrumId: response.spectrumId,
-        points: response.ordinateModified.length,
-        hasAbscissa: Array.isArray(response.abscissa),
-        hasOriginal: Array.isArray(response.ordinateOriginal),
-        hasMetadata: Boolean(response.metadata),
-        styleLabel: response.metadata?.style?.label ?? null,
-        styleColor: response.metadata?.style?.lineColor ?? null,
-      })
-
-      appliedCount += 1
-      appendScriptOutput(`${dataset.style.label}: processed ${response.ordinateModified.length} points.`)
-
+      let outcome = ''
       appState.update((current) => {
-        const datasets = current.datasets.map((item) =>
-          item.id === response.spectrumId
-            ? {
-                ...item,
-                name: response.metadata?.name ?? item.name,
-                sourcePath: response.metadata?.sourcePath ?? item.sourcePath,
-                spectrumType: response.metadata?.spectrumType === 'ir' || response.metadata?.spectrumType === 'raman'
-                  ? response.metadata.spectrumType
-                  : (response.metadata?.spectrumType === 'uv-vis' ? 'uv-vis' : item.spectrumType),
-                units: {
-                  ...item.units,
-                  x: response.metadata?.units?.x ?? item.units.x,
-                  y: response.metadata?.units?.y ?? item.units.y,
-                  xQuantity: item.units.xQuantity ?? 'Abscissa',
-                  yQuantity: item.units.yQuantity ?? 'Ordinate',
-                },
-                style: {
-                  ...item.style,
-                  ...(response.metadata?.style ?? {}),
-                },
-                data: {
-                  ...item.data,
-                  abscissa: response.abscissa ?? item.data.abscissa,
-                  ordinateOriginal: response.ordinateOriginal ?? item.data.ordinateOriginal,
-                  ordinateModified: response.ordinateModified,
-                  precision: response.precision,
-                },
-                peaks: shouldApplyAssignedPeaks(
-                  response.peaks,
-                  response.metadata?.spectrumType ?? item.spectrumType,
-                )
-                  ? mergeAssignedPeaks(item.peaks, response.peaks ?? [])
-                  : item.peaks,
-              }
-            : item,
-        )
-
+        const item = current.datasets.find((candidate) => candidate.id === result.id)
+        // Inputs edited during the run make this result obsolete; the follow-up run replaces it.
+        if (!item || scriptExecutionKey(item, scriptFiles, precision) !== keys.get(result.id)) {
+          outcome = `${label}: inputs changed during execution; result discarded.`
+          return current
+        }
+        let updated
+        try {
+          updated = applyScriptResult(item, result)
+        } catch (error) {
+          outcome = `${label}: ${error instanceof Error ? error.message : String(error)}`
+          errors.push(outcome)
+          return current
+        }
+        appliedCount += 1
+        executionCache.remember(updated.id, keys.get(result.id) ?? '')
+        const removed = result.ordinateModified.filter((value) => Number.isNaN(value)).length
+        outcome = `${label}: processed ${result.ordinateModified.length - removed} points${removed ? ` (${removed} outside the crop window)` : ''}.`
         const nextState = {
           ...current,
-          datasets,
+          datasets: current.datasets.map((candidate) => candidate.id === updated.id ? updated : candidate),
           updatedAt: new Date().toISOString(),
-          scriptProgress: {
-            ...current.scriptProgress,
-            completed: appliedCount,
-            message: `Processed ${dataset.style.label}`,
-          },
+          scriptProgress: { ...current.scriptProgress, completed: appliedCount, message: `Processed ${label}` },
         }
         scheduleAutosave(nextState)
         return nextState
       })
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown script execution failure'
-      datasetErrors.push(`${dataset.style.label}: ${message}`)
-      appendScriptOutput(`${dataset.style.label}: ${message}`)
-      logScriptDebug('execute_script_error', {
-        spectrumId: dataset.id,
-        label: dataset.style.label,
-        message,
-      })
+      appendScriptOutput(outcome)
     }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown script execution failure'
+    errors.push(message)
+    appendScriptOutput(`Execution failed: ${message}`)
+    logScriptDebug('execute_script_error', { datasetIds: sampleIds, message })
+  } finally {
+    finishExecution(appliedCount, selected.length, errors)
   }
-
-  appState.update((current) => ({
-    ...current,
-    workerBusy: false,
-    workerLastError: datasetErrors.length > 0
-      ? `Script applied to ${appliedCount}/${selected.length} samples. First error: ${datasetErrors[0]}`
-      : null,
-    scriptProgress: {
-      active: false,
-      completed: appliedCount,
-      total: selected.length,
-      message: datasetErrors.length > 0 ? 'Execution finished with errors' : 'Execution finished',
-    },
-  }))
-  appendScriptOutput(datasetErrors.length > 0
-    ? `Execution finished with errors (${appliedCount}/${selected.length} samples applied).`
-    : `Execution finished successfully (${appliedCount} sample${appliedCount === 1 ? '' : 's'} applied).`)
 }
 
 export function setScriptOverride(value: string): void {

@@ -1,6 +1,7 @@
 import { get } from 'svelte/store'
 import type { Peak, PeakDetectionOptions } from '../types/project'
 import { appState, workerClient, scheduleAutosave } from './projectContext'
+import { invalidateScriptResult } from './scriptActions'
 
 export async function detectPeaks(datasetId: string, options: PeakDetectionOptions): Promise<void> {
   const dataset = get(appState).datasets.find((item) => item.id === datasetId)
@@ -104,6 +105,8 @@ export async function detectPeaks(datasetId: string, options: PeakDetectionOptio
       scheduleAutosave(nextState)
       return nextState
     })
+    // Detection replaced the auto peaks; IR band labels come from the script, so it must run again.
+    if (dataset.spectrumType === 'ir') invalidateScriptResult(datasetId)
   } catch (error) {
     appState.update((current) => ({
       ...current,
@@ -168,7 +171,7 @@ export function addPeakAtIndex(datasetId: string, index: number): void {
 
       const x = dataset.data.abscissa[index]
       const y = dataset.data.ordinateModified[index]
-      if (x === undefined || y === undefined || dataset.peaks.some((peak) => peak.index === index)) {
+      if (x === undefined || y === undefined || Number.isNaN(y) || dataset.peaks.some((peak) => peak.index === index)) {
         return dataset
       }
 

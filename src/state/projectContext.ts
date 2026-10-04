@@ -12,6 +12,7 @@ import { loadAutosave, saveAutosave } from '../services/persistence/autosave'
 import { axisDefaultsFor } from '../services/spectrumPresets'
 import { buildPipeline } from './pipelineBlueprint'
 import { migrateProjectState } from './migrations'
+import { deriveGeneralSettings } from '../services/generalSettings'
 import type { ParsedSpectrum } from '../services/import/parsers'
 
 export { buildPipeline }
@@ -62,6 +63,7 @@ function buildInitialState(): AppState {
     updatedAt: new Date().toISOString(),
     datasets,
     projectSpectrumType: 'uv-vis',
+    generalSettings: deriveGeneralSettings(datasets, 'uv-vis'),
     viewState: {
       zoomRangeX: [200, 500],
       zoomRangeY: [0, 1.2],
@@ -102,8 +104,8 @@ export function createDatasetFromParsed(input: {
     units: {
       x: unitsX,
       y: unitsY,
-      xQuantity: defaults.xQuantity,
-      yQuantity: defaults.yQuantity,
+      xQuantity: input.parsed.xQuantity ?? defaults.xQuantity,
+      yQuantity: input.parsed.yQuantity ?? defaults.yQuantity,
     },
     data: {
       abscissa: input.parsed.abscissa,
@@ -230,7 +232,7 @@ export function regenerateScript(datasets: SpectrumDataset[]): string {
     logScriptDebug('generated_script', {
       datasetCount: datasets.length,
       firstDataset: datasets[0]?.style.label ?? null,
-      includesSamplesArray: script.includes('SAMPLES = json.loads('),
+      loadsSamplesJson: script.includes('samples.json'),
     })
   }
 

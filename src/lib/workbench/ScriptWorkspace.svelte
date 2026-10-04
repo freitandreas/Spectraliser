@@ -1,12 +1,18 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { EditorState, Transaction } from '@codemirror/state'
+  import { Compartment, EditorState, Transaction } from '@codemirror/state'
   import { EditorView, keymap, lineNumbers, highlightActiveLine } from '@codemirror/view'
   import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
   import { python } from '@codemirror/lang-python'
   import { oneDark } from '@codemirror/theme-one-dark'
   import { projectStore } from '../../state/projectStore'
-  import { effectivePythonFiles, PYTHON_FILE_NAMES, type PythonFileName } from '../../services/script/scriptGenerator'
+  import { computePrecision } from '../../state/computeSettings'
+  import {
+    effectivePythonFiles,
+    PROJECT_FILE_NAMES,
+    SAMPLES_FILE_NAME,
+    type ProjectFileName,
+  } from '../../services/script/scriptGenerator'
 
   export let active: boolean
   export let executionTrigger = 0
@@ -19,7 +25,8 @@
   let autoExecuteTimer: number | null = null
   let pendingAutoRun = false
   let lastDebugSignature = ''
-  let selectedFile: PythonFileName = 'main.py'
+  let selectedFile: ProjectFileName = 'main.py'
+  const readOnlyCompartment = new Compartment()
   let outputViewActive = false
   let lastExecutionTrigger = executionTrigger
   let lastScriptInputSignature = ''
@@ -33,17 +40,36 @@
     ? ($projectStore.userScriptOverride ?? files['main.py'])
     : files[selectedFile]
 
-  $: scriptInputSignature = JSON.stringify($projectStore.datasets.map((dataset) => ({
-    id: dataset.id,
-    name: dataset.name,
-    sourcePath: dataset.sourcePath,
-    spectrumType: dataset.spectrumType,
-    units: dataset.units,
-    style: dataset.style,
-    data: { abscissa: dataset.data.abscissa, ordinateOriginal: dataset.data.ordinateOriginal },
-    pipeline: dataset.pipeline,
-    peaks: dataset.peaks,
-  })))
+  $: readOnlyFile = selectedFile === SAMPLES_FILE_NAME
+
+  // Only script inputs belong here: display metadata (labels, colours, widths, peak
+  // labels) is written to samples.json and must not trigger execution. Array
+  // identity is enough because imports and conversions always create new arrays.
+  $: scriptInputSignature = signatureOf($projectStore.datasets, $computePrecision)
+
+  const arrayIds = new WeakMap<number[], number>()
+  let nextArrayId = 1
+  function arrayId(values: number[]): number {
+    let id = arrayIds.get(values)
+    if (id === undefined) {
+      id = nextArrayId++
+      arrayIds.set(values, id)
+    }
+    return id
+  }
+
+  function signatureOf(datasets: typeof $projectStore.datasets, precision: string): string {
+    return JSON.stringify([precision, datasets.map((dataset) => [
+      dataset.id,
+      dataset.style.visible !== false,
+      dataset.spectrumType,
+      dataset.units.x, dataset.units.y, dataset.units.xQuantity ?? '', dataset.units.yQuantity ?? '',
+      dataset.pipeline,
+      dataset.peakDetection ?? null,
+      arrayId(dataset.data.abscissa),
+      arrayId(dataset.data.ordinateOriginal),
+    ])])
+  }
 
   $: if (lastScriptInputSignature === '') {
     lastScriptInputSignature = scriptInputSignature
@@ -91,12 +117,13 @@
           keymap.of([...defaultKeymap, ...historyKeymap]),
           python(),
           oneDark,
+          readOnlyCompartment.of(EditorState.readOnly.of(readOnlyFile)),
           EditorView.theme({
             '&': { height: '100%' },
             '.cm-scroller': { overflow: 'auto' },
           }),
           EditorView.updateListener.of((update) => {
-            if (!update.docChanged || suppressEditorSync) return
+            if (!update.docChanged || suppressEditorSync || selectedFile === SAMPLES_FILE_NAME) return
 
             projectStore.setPythonFileOverride(selectedFile, update.state.doc.toString())
             const userEdited = update.transactions.some((tx) => {
@@ -125,6 +152,8 @@
   })
 
   $: if (editorHostEl && active && !outputViewActive) ensureCodeMirror()
+
+  $: codeMirrorView?.dispatch({ effects: readOnlyCompartment.reconfigure(EditorState.readOnly.of(readOnlyFile)) })
 
   $: if (codeMirrorView && currentScript !== codeMirrorView.state.doc.toString()) {
     suppressEditorSync = true
@@ -165,7 +194,7 @@
 
     executing = true
     try {
-      await projectStore.executeScriptForDatasets($projectStore.userScriptOverride ?? files['main.py'])
+      await projectStore.executeScriptForDatasets(undefined, { announceSkip: true })
     } finally {
       executing = false
     }
@@ -187,7 +216,7 @@
     executing = true
     pendingAutoRun = false
     try {
-      await projectStore.executeScriptForDatasets($projectStore.userScriptOverride ?? files['main.py'])
+      await projectStore.executeScriptForDatasets()
     } finally {
       executing = false
       if (autoExecute && pendingAutoRun) {
@@ -210,7 +239,7 @@
   <div class="script-content">
     <nav class="script-files" aria-label="Python files">
       <div class="script-files-title">Python files</div>
-      {#each PYTHON_FILE_NAMES as fileName}
+      {#each PROJECT_FILE_NAMES as fileName}
         <button
           type="button"
           class:current={selectedFile === fileName && !outputViewActive}
@@ -220,7 +249,7 @@
             selectedFile = fileName
           }}
         >
-          {fileName}{#if $projectStore.pythonFileOverrides?.[fileName]}<span aria-label="edited"> •</span>{/if}
+          {fileName}{#if $projectStore.pythonFileOverrides?.[fileName]}<span aria-label="edited"> •</span>{/if}{#if fileName === SAMPLES_FILE_NAME}<span class="generated-hint" title="Generated from the sample settings; read-only"> (generated)</span>{/if}
         </button>
       {/each}
       <button
@@ -250,7 +279,12 @@
         {/if}
       </div>
     {:else}
-      <div bind:this={editorHostEl} class="script-editor" aria-label={`${selectedFile} Python editor`}></div>
+      <div class="script-editor-pane">
+        {#if selectedFile === 'main.py'}
+          <p class="file-note">Standalone entry for the exported project. In the app, each execution generates its own runner that sends only the changed samples through processing.py and ir_assignments.py, so edits here do not trigger a run.</p>
+        {/if}
+        <div bind:this={editorHostEl} class="script-editor" aria-label={readOnlyFile ? `${selectedFile} (generated, read-only)` : `${selectedFile} Python editor`}></div>
+      </div>
     {/if}
 
   </div>
