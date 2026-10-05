@@ -150,10 +150,9 @@ describe('colour bars', () => {
 
 describe('single-series view', () => {
   it('turns any plot mode into a 2D spectrum of one series with its peaks', () => {
-    const base = style({ plotMode: 'surface3d', seriesInterpolation: { enabled: true, steps: 3 } })
+    const base = style({ plotMode: 'surface3d' })
     const view = singleSeriesView(a, base)
     expect(view.plotStyle.plotMode).toBe('overlay')
-    expect(view.plotStyle.seriesInterpolation.enabled).toBe(false)
     expect(base.plotMode).toBe('surface3d')
     const figure = buildPlotFigure({ ...view })
     expect(figure.mode).toBe('overlay')

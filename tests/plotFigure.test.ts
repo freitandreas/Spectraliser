@@ -58,23 +58,29 @@ describe('plot figure', () => {
     expect(figure.notices.join(' ')).toMatch(/No concentration found for t = 0 s, t = 1 min/)
   })
 
-  it('builds a WebGL surface with labelled scene axes and plain titles', () => {
+  it('builds a WebGL surface with labelled scene axes and markup titles', () => {
     const figure = buildPlotFigure({ datasets, plotStyle: style({ plotMode: 'surface3d', axisLabelFormat: 'fraction', seriesUnit: 'min' }) })
     expect(figure.traces[0]).toMatchObject({ type: 'surface', y: [0, 1] })
     expect(figure.usesMath).toBe(false)
     expect(figure.layout.scene).toMatchObject({
-      xaxis: { title: { text: 'Wavelength / nm' } },
-      yaxis: { title: { text: 'Time / min' } },
       zaxis: { title: { text: 'Absorbance' } },
     })
+    const scene = figure.layout.scene as Record<string, { title: { text: string } }>
+    expect(scene.xaxis.title.text).toMatch(/^Wavelength<br>─+<br>nm$/)
+    expect(scene.yaxis.title.text).toMatch(/^Time<br>─+<br>min$/)
+    expect(JSON.stringify(scene)).not.toContain('$')
   })
 
-  it('adds clearly labelled interpolated series without changing the measured traces', () => {
-    const before = structuredClone(datasets)
-    const figure = buildPlotFigure({ datasets, plotStyle: style({ seriesInterpolation: { enabled: true, steps: 2 } }) })
-    expect(figure.generatedSeries).toBe(2)
-    expect(figure.traces.filter((trace) => trace.legendgroup === 'interpolated')).toHaveLength(2)
-    expect(datasets).toEqual(before)
+  it('renders symbol subscripts as markup in WebGL scene titles', () => {
+    const figure = buildPlotFigure({ datasets, plotStyle: style({ plotMode: 'surface3d', quantityNotation: 'symbol' }) })
+    const scene = figure.layout.scene as Record<string, { title: { text: string } }>
+    expect(scene.xaxis.title.text).toBe('<i>λ</i> / nm')
+    expect(scene.zaxis.title.text).toContain('<i>')
+  })
+
+  it('draws only measured series in the overlay', () => {
+    const figure = buildPlotFigure({ datasets, plotStyle: style({ plotMode: 'overlay' }) })
+    expect(figure.traces.filter((trace) => trace.type === 'scatter' && trace.legendgroup !== 'peaks')).toHaveLength(datasets.length)
   })
 
   it('falls back to overlay with a notice for a single series', () => {
@@ -93,5 +99,36 @@ describe('plot figure', () => {
     const mixed = buildPlotFigure({ datasets: [normalised(datasets[0]), datasets[1]], plotStyle: style({}) })
     expect(mixed.layout.yaxis).toMatchObject({ title: { text: 'Absorbance' } })
     expect(mixed.notices.join(' ')).toMatch(/Normalisation is enabled for 1 of 2/)
+  })
+
+  describe('presentation (export) figures', () => {
+    const peak = (id: string, index: number, x: number) => ({ id, index, x, y: 1 }) as SpectrumDataset['peaks'][number]
+    const withPeaks = [
+      { ...datasets[0], peaks: [peak('pa', 1, 450)] },
+      { ...datasets[1], peaks: [peak('pb', 1, 450), peak('pc', 2, 500)] },
+    ]
+
+    it('draws every series equally even when one is selected or highlighted', () => {
+      const figure = buildPlotFigure({ datasets: withPeaks, plotStyle: style({}), selectedSpectrumId: 'a', highlightedDatasetId: 'b', presentation: true, showPeaks: false })
+      const lines = figure.traces.slice(0, 2)
+      expect(lines.map((trace) => trace.opacity)).toEqual([1, 1])
+      expect(lines.map((trace) => (trace.line as { width: number }).width)).toEqual([2, 2])
+      expect(figure.traces).toHaveLength(2)
+      expect(figure.layout.annotations).toEqual([])
+    })
+
+    it('shows the peaks of all series when peaks are enabled', () => {
+      const figure = buildPlotFigure({ datasets: withPeaks, plotStyle: style({}), selectedSpectrumId: 'a', presentation: true, showPeaks: true })
+      const peakTraces = figure.traces.filter((trace) => trace.name === 'Peaks')
+      expect(peakTraces.map((trace) => trace.x)).toEqual([[450], [450, 500]])
+      expect(figure.layout.annotations).toHaveLength(3)
+    })
+
+    it('marks peaks of all series without a selection guide in the heatmap', () => {
+      const figure = buildPlotFigure({ datasets: withPeaks, plotStyle: style({ plotMode: 'heatmap' }), selectedSpectrumId: 'a', presentation: true, showPeaks: true })
+      expect(figure.traces.filter((trace) => trace.name === 'Peaks')).toHaveLength(2)
+      expect(figure.layout.shapes).toEqual([])
+      expect(figure.layout.annotations).toHaveLength(3)
+    })
   })
 })

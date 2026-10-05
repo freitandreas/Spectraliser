@@ -10,8 +10,7 @@ export interface SeriesGrid {
   coordinates: number[]
   z: number[][]
   labels: string[]
-  generated: boolean[]
-  /** Input series index of every row; -1 for generated intermediate rows. */
+  /** Input series index of every row. */
   sources: number[]
   /** True when at least one series had to be resampled onto the shared abscissa. */
   resampled: boolean
@@ -48,11 +47,10 @@ function sameAxis(left: number[], right: number[]): boolean {
 
 /**
  * Places series on a shared abscissa (the overlap of all measured ranges) ordered by
- * series coordinate. Optional intermediate rows are linear blends between neighbouring
- * measured rows, so generated values never leave the measured coordinate interval.
- * Inputs are never mutated.
+ * series coordinate. Only measured series become rows; heatmap smoothing and the surface
+ * mesh interpolate visually between them. Inputs are never mutated.
  */
-export function buildSeriesGrid(series: SeriesGridInput[], interpolationSteps = 0): SeriesGrid {
+export function buildSeriesGrid(series: SeriesGridInput[]): SeriesGrid {
   if (series.length < 2) throw new Error('At least two series are required.')
   const ordered = series.map((item, source) => ({ ...item, source })).sort((left, right) => left.coordinate - right.coordinate)
   const pairsBySeries = ordered.map((item) => sortedPairs(item.abscissa, item.ordinate))
@@ -68,29 +66,12 @@ export function buildSeriesGrid(series: SeriesGridInput[], interpolationSteps = 
   const resampled = pairsBySeries.some((pairs) => !sameAxis(pairs.map(([value]) => value), pairsBySeries[0].map(([value]) => value)))
   const measured = pairsBySeries.map((pairs) => x.map((value) => sampleLinear(pairs, value)))
 
-  const steps = Math.max(0, Math.floor(interpolationSteps))
-  const coordinates: number[] = []
-  const z: number[][] = []
-  const labels: string[] = []
-  const generated: boolean[] = []
-  const sources: number[] = []
-  ordered.forEach((item, index) => {
-    coordinates.push(item.coordinate)
-    z.push(measured[index])
-    labels.push(item.label)
-    generated.push(false)
-    sources.push(item.source)
-    const next = ordered[index + 1]
-    if (!next || steps === 0) return
-    for (let step = 1; step <= steps; step += 1) {
-      const fraction = step / (steps + 1)
-      coordinates.push(item.coordinate + fraction * (next.coordinate - item.coordinate))
-      z.push(measured[index].map((value, column) => value + fraction * (measured[index + 1][column] - value)))
-      labels.push(`Interpolated between ${item.label} and ${next.label}`)
-      generated.push(true)
-      sources.push(-1)
-    }
-  })
-
-  return { x, coordinates, z, labels, generated, sources, resampled }
+  return {
+    x,
+    coordinates: ordered.map((item) => item.coordinate),
+    z: measured,
+    labels: ordered.map((item) => item.label),
+    sources: ordered.map((item) => item.source),
+    resampled,
+  }
 }

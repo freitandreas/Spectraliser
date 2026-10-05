@@ -131,6 +131,10 @@ input[type='range'] {
   overflow: hidden;
 }
 
+.bottom-panel.export-mode {
+  grid-template-rows: minmax(0, 1fr);
+}
+
 .tab-button {
   background: transparent;
   border: 0;
@@ -611,6 +615,14 @@ input[type='range'] {
 .peak-mode-toggle label:focus-within {
   outline: 1px solid var(--text-dim);
   outline-offset: -1px;
+}
+
+.peak-mode-fixed {
+  padding: 3px 10px;
+  font-size: 0.74rem;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 6px;
 }
 
 .peak-mode-toggle input {

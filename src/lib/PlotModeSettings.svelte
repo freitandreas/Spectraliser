@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { MAX_INTERPOLATION_STEPS, type PlotMode, type PlotStylePreferences } from '../services/startupPreferences'
+  import type { PlotMode, PlotStylePreferences } from '../services/startupPreferences'
   import { defaultUnitForKind, fieldKind, unitsForKind } from '../services/metadataFields'
   import HelpTip from './HelpTip.svelte'
 
@@ -17,7 +17,6 @@
   const HELP = {
     modes: 'All in one overlays every series in one spectrum. Heatmap shows abscissa × third axis with the ordinate as colour. 3D surface plots abscissa, third axis and ordinate in WebGL.',
     axis: 'Coordinate that orders the series in heatmap and 3D views. Values come from the metadata box in each sample’s Data tab; time is also read from series labels such as “t = 30 s”, “2.5 min” or “00:01:30”. Time and concentration are converted into the chosen unit; series without a usable value are placed by their order.',
-    interpolation: 'Inserts linearly blended spectra between neighbouring measured series only (no extrapolation). Generated series are drawn dotted and marked as interpolated; imported data are never changed.',
   }
 
   $: kind = fieldKind(plotStyle.seriesField)
@@ -36,14 +35,6 @@
     patch({ seriesField: field, seriesUnit: defaultUnitForKind(fieldKind(field)) })
   }
 
-  function patchInterpolation(next: Partial<PlotStylePreferences['seriesInterpolation']>): void {
-    patch({ seriesInterpolation: { ...plotStyle.seriesInterpolation, ...next } })
-  }
-
-  function setSteps(raw: string): void {
-    const value = Math.round(Number(raw))
-    if (Number.isFinite(value)) patchInterpolation({ steps: Math.min(MAX_INTERPOLATION_STEPS, Math.max(1, value)) })
-  }
 </script>
 
 <div class="plot-mode-settings" class:compact>
@@ -77,31 +68,6 @@
       </label>
     {/if}
   </div>
-
-  <div class="series-row">
-    <label class="toggle">
-      <input
-        type="checkbox"
-        checked={plotStyle.seriesInterpolation.enabled}
-        on:change={(event) => patchInterpolation({ enabled: (event.target as HTMLInputElement).checked })}
-      />
-      <span>Interpolate between measured series</span>
-      <HelpTip label="Interpolation" text={HELP.interpolation} />
-    </label>
-    {#if plotStyle.seriesInterpolation.enabled}
-      <label>
-        Intermediate series per interval
-        <input
-          type="number"
-          min="1"
-          max={MAX_INTERPOLATION_STEPS}
-          step="1"
-          value={plotStyle.seriesInterpolation.steps}
-          on:change={(event) => setSteps((event.target as HTMLInputElement).value)}
-        />
-      </label>
-    {/if}
-  </div>
 </div>
 
 <style>
@@ -114,8 +80,5 @@
   .series-row{display:flex;flex-wrap:wrap;align-items:end;gap:12px}
   label{display:grid;gap:6px;color:#c2c7cb;font-size:.75rem}
   .label-line{display:inline-flex;align-items:center;gap:6px}
-  .toggle{display:flex;align-items:center;gap:7px;min-height:34px}
-  input,select{min-width:0;background:#1c1c20;color:#d4d4d4;border:1px solid #3f3f46;border-radius:6px;padding:7px}
-  input[type=number]{width:90px}
-  input[type=checkbox]{accent-color:#86aebc}
+  select{min-width:0;background:#1c1c20;color:#d4d4d4;border:1px solid #3f3f46;border-radius:6px;padding:7px}
 </style>

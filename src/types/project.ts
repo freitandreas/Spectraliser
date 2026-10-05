@@ -67,6 +67,19 @@ export const DEFAULT_PEAK_DETECTION: PeakDetectionOptions = {
   auto: true,
 }
 
+/** IR bands are always read as dips, so IR peak detection is fixed to minima. */
+export function peakModeFor(spectrumType: SpectrumType, requested: PeakDetectionOptions['mode'] = 'maxima'): PeakDetectionOptions['mode'] {
+  return spectrumType === 'ir' ? 'minima' : requested
+}
+
+/** Detection options with the mode the spectrum type requires; minima carry a negative prominence. */
+export function peakDetectionFor(spectrumType: SpectrumType, options?: PeakDetectionOptions): PeakDetectionOptions {
+  const base = options ?? DEFAULT_PEAK_DETECTION
+  const mode = peakModeFor(spectrumType, base.mode)
+  if (options && mode === options.mode) return options
+  return { ...base, mode, prominence: mode === 'minima' ? -Math.abs(base.prominence) : Math.abs(base.prominence) }
+}
+
 export interface TransformDefinition {
   id: string
   type:
@@ -94,6 +107,8 @@ export interface SpectrumDataset {
   /** Fields such as Time or Concentration; values carry their unit (`30 s`, `0.5 mM`). */
   experimentMetadata?: ExperimentMetadata
   peakDetection?: PeakDetectionOptions
+  /** Detected peaks the user deleted since the last detection run; reset by a new detection. */
+  removedPeakCount?: number
 }
 
 export interface ViewState {

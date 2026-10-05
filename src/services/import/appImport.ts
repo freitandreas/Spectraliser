@@ -69,7 +69,13 @@ export async function importFilesWithOptions(files: File[], options: ImportOptio
     if (prepared.error) return prepared.error
     allDatasets.push(...prepared.datasets)
   }
-  return projectStore.importDatasets(allDatasets)
+  const existing = new Set(projectStore.snapshot().datasets.map((dataset) => dataset.id))
+  const error = await projectStore.importDatasets(allDatasets)
+  if (error) return error
+  const added = projectStore.snapshot().datasets.filter((dataset) => !existing.has(dataset.id)).map((dataset) => dataset.id)
+  // Not awaited: the import dialog closes while processing and peak detection run in the background.
+  void projectStore.detectPeaksAfterImport(added)
+  return null
 }
 
 export async function importFileWithOptions(file: File, options: ImportOptions): Promise<string | null> {

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { startSideColumnResize } from './columnResize'
-  import type { SpectrumDataset } from '../../types/project'
+  import { peakModeFor, type SpectrumDataset } from '../../types/project'
   import QuantityLabel from '../QuantityLabel.svelte'
   import HelpTip from '../HelpTip.svelte'
   import { peakShape, type PeakShape } from '../../services/peakShape'
@@ -35,8 +35,8 @@
   let peakViewEl: HTMLDivElement | null = null
   let settingsWidthPx = 304
 
-  $: if (mode !== (dataset.peakDetection?.mode ?? 'maxima')) {
-    mode = dataset.peakDetection?.mode ?? 'maxima'
+  $: if (mode !== peakModeFor(dataset.spectrumType, dataset.peakDetection?.mode)) {
+    mode = peakModeFor(dataset.spectrumType, dataset.peakDetection?.mode)
   }
 
   function handleModeChange(event: Event): void {
@@ -83,7 +83,7 @@
   // Recomputed from the current ordinate so the values follow processing and unit changes.
   function computeShapes(item: SpectrumDataset): Map<string, PeakShape | null> {
     const indices = item.peaks.map((peak) => peak.index).sort((a, b) => a - b)
-    const peakMode = item.peakDetection?.mode ?? 'maxima'
+    const peakMode = peakModeFor(item.spectrumType, item.peakDetection?.mode)
     return new Map(item.peaks.map((peak) => {
       const position = indices.indexOf(peak.index)
       return [peak.id, peakShape(item.data.abscissa, item.data.ordinateModified, peak.index, peakMode, {
@@ -195,6 +195,9 @@
   <aside class="peak-settings-col">
     <div class="peak-settings-header">
       <h4>Peak detection</h4>
+      {#if isIr}
+        <span class="peak-mode-fixed" title="IR bands are read as transmittance dips, so IR peaks are always minima.">Minima (IR)</span>
+      {:else}
       <div class="peak-mode-toggle" role="radiogroup" aria-label="Peak mode">
         {#each PEAK_MODES as option (option.id)}
           <label class:active={mode === option.id} title={option.help}>
@@ -203,6 +206,7 @@
           </label>
         {/each}
       </div>
+      {/if}
     </div>
 
     <div class="peak-auto-row">

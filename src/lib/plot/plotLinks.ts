@@ -12,7 +12,7 @@ export interface PeakTraceLink {
   peakIds: string[]
 }
 
-/** Maps heatmap/surface grid rows back to datasets; generated (interpolated) rows map to null. */
+/** Maps heatmap/surface grid rows back to datasets. */
 export interface GridLink {
   traceIndex: number
   coordinates: number[]
@@ -47,7 +47,7 @@ export function nearestIndex(values: ArrayLike<number>, target: number): number 
 /**
  * Resolves a hovered/clicked grid cell to the measured point it shows. The row is identified by
  * its series coordinate, the point by the nearest measured abscissa of that dataset, so resampled
- * grids still link to real measurements. Interpolated rows have no measurement and resolve to null.
+ * grids still link to real measurements.
  */
 export function resolveGridPoint(
   link: GridLink,

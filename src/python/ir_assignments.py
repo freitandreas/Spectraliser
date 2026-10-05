@@ -25,10 +25,8 @@ def _is_wavenumber(meta, x):
 
 
 def _peak_settings(meta):
-    settings = meta.get('peakDetection')
-    if settings:
-        return settings
-    return {'mode': meta.get('peakDetectionMode', 'maxima')}
+    # IR bands are transmittance dips, so detection always looks for minima.
+    return {**(meta.get('peakDetection') or {}), 'mode': 'minima'}
 
 
 def _detect(df, meta):

@@ -7,25 +7,17 @@ const series = [
 ]
 
 describe('series grid', () => {
-  it('sorts measured series by coordinate without generated rows by default', () => {
+  it('sorts measured series by coordinate with one row per measured series', () => {
     const grid = buildSeriesGrid(series)
     expect(grid.coordinates).toEqual([0, 20])
     expect(grid.labels).toEqual(['early', 'late'])
-    expect(grid.generated).toEqual([false, false])
-  })
-
-  it('inserts flagged, bounded linear intermediates only between measured coordinates', () => {
-    const grid = buildSeriesGrid(series, 1)
-    expect(grid.coordinates).toEqual([0, 10, 20])
-    expect(grid.generated).toEqual([false, true, false])
-    expect(grid.z[1]).toEqual([1, 2, 3])
-    expect(Math.min(...grid.coordinates)).toBe(0)
-    expect(Math.max(...grid.coordinates)).toBe(20)
+    expect(grid.sources).toEqual([1, 0])
+    expect(grid.z).toEqual([[0, 0, 0], [2, 4, 6]])
   })
 
   it('does not mutate source data', () => {
     const input = structuredClone(series)
-    buildSeriesGrid(input, 3)
+    buildSeriesGrid(input)
     expect(input).toEqual(series)
   })
 

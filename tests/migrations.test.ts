@@ -43,6 +43,14 @@ function legacyProject(): AppState & Record<string, unknown> {
 }
 
 describe('project migrations', () => {
+  it('fixes IR peak detection to minima with a negative prominence', () => {
+    const legacy = legacyProject()
+    legacy.datasets[0].peakDetection = { prominence: 0.05, minDistance: 3, minHeight: null, mode: 'maxima' }
+    const [dataset] = migrateProjectState(legacy).datasets
+
+    expect(dataset.peakDetection).toEqual({ prominence: -0.05, minDistance: 3, minHeight: null, mode: 'minima' })
+  })
+
   it('upgrades legacy projects to the current schema', () => {
     const migrated = migrateProjectState(legacyProject())
 
@@ -73,7 +81,7 @@ describe('project migrations', () => {
 
     expect(dataset.peaks).toEqual([])
     expect(dataset.experimentMetadata).toEqual({})
-    expect(dataset.peakDetection).toMatchObject({ prominence: 0.01, mode: 'maxima' })
+    expect(dataset.peakDetection).toMatchObject({ prominence: -0.01, mode: 'minima' })
     expect(dataset.units.xQuantity).toBe('Abscissa')
     expect(dataset.units.yQuantity).toBe('Ordinate')
   })

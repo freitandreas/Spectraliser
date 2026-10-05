@@ -35,7 +35,8 @@ export function scriptExecutionKey(
     spectrumType: dataset.spectrumType,
     units: [dataset.units.x, dataset.units.y, dataset.units.xQuantity ?? '', dataset.units.yQuantity ?? ''],
     pipeline: dataset.pipeline,
-    peakDetection: dataset.peakDetection ?? null,
+    // Only the IR assignment step reads peak settings; elsewhere they must not force reprocessing.
+    peakDetection: dataset.spectrumType === 'ir' ? dataset.peakDetection ?? null : null,
     abscissa: arrayId(dataset.data.abscissa),
     ordinate: arrayId(dataset.data.ordinateOriginal),
   }))

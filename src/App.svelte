@@ -7,9 +7,11 @@
   import SampleExplorer from './lib/workbench/SampleExplorer.svelte'
   import WorkspaceMain from './lib/workbench/WorkspaceMain.svelte'
   import SettingsSidebar from './lib/workbench/SettingsSidebar.svelte'
+  import ExportSidebar from './lib/workbench/ExportSidebar.svelte'
   import ConfirmDialogs from './lib/workbench/ConfirmDialogs.svelte'
   import { importFilesWithOptions } from './services/import/appImport'
-  import { downloadReport, type ExportFormat } from './services/export/downloadReport'
+  import { executeExport } from './services/export/executeExport'
+  import { DEFAULT_EXPORT_SETTINGS, type ExportSettings } from './services/export/exportSettings'
   import type { ImportOptions } from './services/import/parsers'
   import { projectStore } from './state/projectStore'
   import type { MetadataPatch, StylePatch } from './state/datasetActions'
@@ -47,7 +49,15 @@
   $: computePrecision.set(startupPreferences.computePrecision)
   $: quantityNotation.set(startupPreferences.plotStyle.quantityNotation)
   let exportOpen = false
-  let exportFormat: ExportFormat = 'html'
+  let exportSettings: ExportSettings = { ...DEFAULT_EXPORT_SETTINGS }
+  let exportBusy = false
+  let exportError = ''
+  let previousExportLayout: {
+    bottomPanelOpen: boolean
+    bottomPanelHeight: number
+    rightPanelOpen: boolean
+    rightPanelDatasetId: string | null
+  } | null = null
 
   let overwriteModalOpen = false
   let pendingGuiAction: (() => void) | null = null
@@ -276,9 +286,55 @@
     setTransformParams(queueGuiAction, datasetId, transformId, params)
   }
 
-  function confirmExport(): void {
+  function openExport(): void {
+    if (exportOpen) return
+    previousExportLayout = {
+      bottomPanelOpen,
+      bottomPanelHeight,
+      rightPanelOpen,
+      rightPanelDatasetId,
+    }
+    exportError = ''
+    exportOpen = true
+    rightPanelOpen = true
+    bottomPanelOpen = true
+    const availableHeight = layoutEl?.clientHeight ?? window.innerHeight - 100
+    bottomPanelHeight = Math.round(availableHeight * 0.76)
+  }
+
+  function closeExport(): void {
+    if (!exportOpen) return
     exportOpen = false
-    downloadReport(exportFormat)
+    if (previousExportLayout) {
+      bottomPanelOpen = previousExportLayout.bottomPanelOpen
+      bottomPanelHeight = previousExportLayout.bottomPanelHeight
+      rightPanelOpen = previousExportLayout.rightPanelOpen
+      rightPanelDatasetId = previousExportLayout.rightPanelDatasetId
+    }
+    previousExportLayout = null
+  }
+
+  async function runExport(): Promise<void> {
+    if (exportBusy) return
+    exportBusy = true
+    exportError = ''
+    let pdfWindow: Window | null = null
+    try {
+      if (exportSettings.format === 'pdf-report') {
+        pdfWindow = window.open('', '_blank')
+        if (!pdfWindow) throw new Error('The PDF print window was blocked. Allow pop-ups and try again.')
+      }
+      const needsPlot = ['plot-image', 'latex-report'].includes(exportSettings.format)
+        || (['pdf-report', 'html'].includes(exportSettings.format) && visibleDatasets.length > 0)
+      const image = needsPlot ? await workspaceMain?.getExportPlotImage() ?? null : null
+      executeExport(projectStore.snapshot(), exportSettings, image, pdfWindow)
+      closeExport()
+    } catch (error) {
+      pdfWindow?.close()
+      exportError = error instanceof Error ? error.message : String(error)
+    } finally {
+      exportBusy = false
+    }
   }
 
   function clearFileSelection(): void {
@@ -409,7 +465,7 @@
       rightPanelOpen = true
       rightPanelDatasetId = null
     }}
-    onExport={() => { exportOpen = true }}
+    onExport={openExport}
     onLinkMetadata={openMetadataLink}
     datasetCount={$projectStore.datasets.length}
   />
@@ -458,8 +514,13 @@
       onOpenSubTab={openSampleSubTab}
       onActivateScript={activateScriptTab}
       onCloseTab={closeSampleTab}
-      onCloseBottomPanel={() => { bottomPanelOpen = false }}
+      onCloseBottomPanel={() => {
+        if (exportOpen) closeExport()
+        else bottomPanelOpen = false
+      }}
       onLinkMetadata={openMetadataLink}
+      exportPreviewOpen={exportOpen}
+      {exportSettings}
     />
 
     <button
@@ -470,60 +531,41 @@
       on:mousedown={(event) => startResize('right', event)}
     ></button>
 
-    <SettingsSidebar
-      open={rightPanelOpen}
-      dataset={rightPanelDataset}
-      datasets={$projectStore.datasets}
-      generalSettings={$projectStore.generalSettings}
-      {generalContext}
-      onClose={() => { rightPanelOpen = false }}
-      onRename={renameDataset}
-      onUpdateStyle={updateDatasetStyle}
-      onUpdateMetadata={updateDatasetMetadata}
-      onRerunPipeline={(datasetId) => projectStore.rerunPipeline(datasetId)}
-      onTransformEnabled={updateTransformEnabled}
-      onTransformParam={updateTransformParam}
-      plotStyle={startupPreferences.plotStyle}
-      onUpdatePlotStyle={updatePlotStyle}
-      computePrecision={startupPreferences.computePrecision}
-      onUpdateComputePrecision={updateComputePrecision}
-    />
+    {#if exportOpen}
+      <ExportSidebar
+        settings={exportSettings}
+        onChange={(next) => { exportSettings = next }}
+        onExport={() => { void runExport() }}
+        onClose={closeExport}
+        error={exportError}
+        busy={exportBusy}
+      />
+    {:else}
+      <SettingsSidebar
+        open={rightPanelOpen}
+        dataset={rightPanelDataset}
+        datasets={$projectStore.datasets}
+        generalSettings={$projectStore.generalSettings}
+        {generalContext}
+        onClose={() => { rightPanelOpen = false }}
+        onRename={renameDataset}
+        onUpdateStyle={updateDatasetStyle}
+        onUpdateMetadata={updateDatasetMetadata}
+        onRerunPipeline={(datasetId) => projectStore.rerunPipeline(datasetId)}
+        onTransformEnabled={updateTransformEnabled}
+        onTransformParam={updateTransformParam}
+        plotStyle={startupPreferences.plotStyle}
+        onUpdatePlotStyle={updatePlotStyle}
+        computePrecision={startupPreferences.computePrecision}
+        onUpdateComputePrecision={updateComputePrecision}
+      />
+    {/if}
   </div>
 
   {#if importError}
     <div class="toast toast-error">{importError}</div>
   {/if}
 </div>
-
-{#if exportOpen}
-  <div class="confirm-backdrop" role="presentation">
-    <div class="confirm-modal" role="dialog" aria-modal="true" aria-label="Export options">
-      <h3>Export project</h3>
-      <div class="export-options">
-        <label>
-          <input type="radio" bind:group={exportFormat} value="html" />
-          HTML report
-        </label>
-        <label>
-          <input type="radio" bind:group={exportFormat} value="csv" />
-          CSV summary
-        </label>
-        <label>
-          <input type="radio" bind:group={exportFormat} value="json" />
-          JSON snapshot
-        </label>
-        <label>
-          <input type="radio" bind:group={exportFormat} value="python" />
-          Python project (.zip) — current scripts, samples.json and imported data
-        </label>
-      </div>
-      <div class="confirm-actions">
-        <button type="button" class="ghost" on:click={() => { exportOpen = false }}>Cancel</button>
-        <button type="button" class="run" on:click={confirmExport}>Download</button>
-      </div>
-    </div>
-  </div>
-{/if}
 
 <ImportWizard
   open={importOpen}

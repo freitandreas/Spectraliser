@@ -9,16 +9,12 @@ export interface PlotView {
 
 /**
  * Reduces any plot mode to a plain 2D spectrum of one series (with its peaks), independent of
- * the series' visibility. Interpolation is switched off because a single series has no neighbours.
+ * the series' visibility.
  */
 export function singleSeriesView(dataset: SpectrumDataset, plotStyle: PlotStylePreferences): PlotView {
   return {
     datasets: [dataset],
-    plotStyle: {
-      ...plotStyle,
-      plotMode: 'overlay',
-      seriesInterpolation: { ...plotStyle.seriesInterpolation, enabled: false },
-    },
+    plotStyle: { ...plotStyle, plotMode: 'overlay' },
     selectedSpectrumId: dataset.id,
   }
 }

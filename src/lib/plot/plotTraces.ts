@@ -1,4 +1,4 @@
-import type { SpectrumDataset } from '../../types/project'
+import { peakModeFor, type SpectrumDataset } from '../../types/project'
 import type { PlotSeriesMode } from '../../services/startupPreferences'
 import { formatUnit } from '../../services/spectrumPresets'
 
@@ -57,9 +57,10 @@ export function buildLineTraces(
   highlightedDatasetId: string | null,
   lineWidthOverride?: number,
   seriesMode: PlotSeriesMode = 'lines',
+  uniform = false,
 ): PlotTrace[] {
   return datasets.map((dataset) => {
-    const emphasised = dataset.id === selectedSpectrumId || dataset.id === highlightedDatasetId
+    const emphasised = uniform || dataset.id === selectedSpectrumId || dataset.id === highlightedDatasetId
 
     return {
       x: dataset.data.abscissa,
@@ -91,7 +92,7 @@ export function buildPeakAnnotations(dataset: SpectrumDataset | null): Record<st
     return []
   }
 
-  const minima = dataset.peakDetection?.mode === 'minima'
+  const minima = peakModeFor(dataset.spectrumType, dataset.peakDetection?.mode) === 'minima'
 
   return dataset.peaks.map((peak) => ({
     x: peak.x,

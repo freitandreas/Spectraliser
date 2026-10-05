@@ -16,6 +16,8 @@ export interface GridBaseInput {
   target: 'cartesian' | 'scene'
   /** Visual lift of 3D markers above the surface so they are not hidden in it; hover shows true values. */
   sceneLift?: number
+  /** Export view: peaks of every series and no selection guide. */
+  allPeaks?: boolean
 }
 
 export interface GridBase {
@@ -36,13 +38,20 @@ function inRange(value: number, [low, high]: [number, number]): boolean {
  */
 export function buildGridBase(input: GridBaseInput): GridBase {
   const result: GridBase = { traces: [], shapes: [], annotations: [], peaks: null }
-  const scene = input.target === 'scene'
-  const lift = scene ? input.sceneLift ?? 0 : 0
+  if (input.allPeaks) {
+    if (!input.showPeaks) return result
+    for (const dataset of input.datasets) {
+      const coordinate = input.coordinates.get(dataset.id)
+      if (coordinate !== undefined && Number.isFinite(coordinate)) appendPeaks(result, input, dataset, coordinate, false)
+    }
+    return result
+  }
   const dataset = input.datasets.find((item) => item.id === input.selectedSpectrumId)
   const coordinate = dataset ? input.coordinates.get(dataset.id) : undefined
   if (!dataset || coordinate === undefined || !Number.isFinite(coordinate)) return result
 
-  if (!scene) {
+  const lift = input.target === 'scene' ? input.sceneLift ?? 0 : 0
+  if (input.target !== 'scene') {
     result.shapes.push(...guideShapes(coordinate, input.xRange, dataset.style.lineColor, true))
   } else {
     const indices = dataset.data.abscissa.flatMap((x, index) => (inRange(x, input.xRange) ? [index] : []))
@@ -61,10 +70,17 @@ export function buildGridBase(input: GridBaseInput): GridBase {
     }
   }
 
-  const peaks = input.showPeaks ? dataset.peaks.filter((peak) => inRange(peak.x, input.xRange)) : []
-  if (peaks.length === 0) return result
+  appendPeaks(result, input, dataset, coordinate, true)
+  return result
+}
 
-  result.peaks = { traceIndex: input.traceOffset + result.traces.length, datasetId: dataset.id, peakIds: peaks.map((peak) => peak.id) }
+function appendPeaks(result: GridBase, input: GridBaseInput, dataset: SpectrumDataset, coordinate: number, linked: boolean): void {
+  const scene = input.target === 'scene'
+  const lift = scene ? input.sceneLift ?? 0 : 0
+  const peaks = input.showPeaks ? dataset.peaks.filter((peak) => inRange(peak.x, input.xRange)) : []
+  if (peaks.length === 0) return
+
+  if (linked) result.peaks = { traceIndex: input.traceOffset + result.traces.length, datasetId: dataset.id, peakIds: peaks.map((peak) => peak.id) }
   const peakValues = peaks.map((peak) => dataset.data.ordinateModified[peak.index] ?? peak.y)
   const peakHover = `%{x:.6g}${unitSuffix(dataset.units.x)}<br>%{customdata:.6g}${unitSuffix(dataset.units.y)}<extra>${dataset.style.label} peak</extra>`
   const marker = { symbol: 'diamond', color: dataset.style.lineColor, line: { color: '#f8f8f8', width: scene ? 1 : 1.5 } }
@@ -85,7 +101,7 @@ export function buildGridBase(input: GridBaseInput): GridBase {
       marker: { ...marker, size: 5 },
       hovertemplate: peakHover,
     })
-    return result
+    return
   }
   result.traces.push({
     x: peaks.map((peak) => peak.x),
@@ -98,7 +114,7 @@ export function buildGridBase(input: GridBaseInput): GridBase {
     marker: { ...marker, size: 9 },
     hovertemplate: peakHover,
   })
-  result.annotations = peaks.map((peak) => ({
+  result.annotations.push(...peaks.map((peak) => ({
     x: peak.x,
     y: coordinate,
     text: peak.x.toFixed(2),
@@ -109,6 +125,5 @@ export function buildGridBase(input: GridBaseInput): GridBase {
     yshift: 10,
     font: { color: '#f8f8f8', size: 11 },
     bgcolor: 'rgba(10,10,12,0.55)',
-  }))
-  return result
+  })))
 }

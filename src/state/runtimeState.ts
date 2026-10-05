@@ -28,9 +28,11 @@ export function patchRuntime(patch: Partial<RuntimeState> | ((current: RuntimeSt
   runtimeState.update((current) => ({ ...current, ...(typeof patch === 'function' ? patch(current) : patch) }))
 }
 
-export function appendScriptOutput(message: string): void {
+export function appendScriptOutput(...messages: string[]): void {
+  if (messages.length === 0) return
+  const stamp = new Date().toLocaleTimeString()
   patchRuntime((current) => ({
-    scriptOutput: [...current.scriptOutput, `[${new Date().toLocaleTimeString()}] ${message}`].slice(-OUTPUT_LIMIT),
+    scriptOutput: [...current.scriptOutput, ...messages.map((message) => `[${stamp}] ${message}`)].slice(-OUTPUT_LIMIT),
   }))
 }
 

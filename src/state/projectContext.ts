@@ -2,6 +2,7 @@ import { get, writable } from 'svelte/store'
 import {
   APP_SCHEMA_VERSION,
   DEFAULT_PEAK_DETECTION,
+  peakDetectionFor,
   DEFAULT_STYLE,
   getSpectrumStyleDefaults,
   type AppState,
@@ -125,7 +126,7 @@ export function createDatasetFromParsed(input: {
     },
     peaks: [],
     experimentMetadata: {},
-    peakDetection: { ...DEFAULT_PEAK_DETECTION },
+    peakDetection: peakDetectionFor(spectrumType),
   }
 }
 

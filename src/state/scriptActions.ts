@@ -8,6 +8,8 @@ import { computePrecision } from './computeSettings'
 import { ExecutionCache, scriptExecutionKey } from './executionCache'
 import { applyScriptResult } from './scriptResult'
 import { buildRunScript, runnerMetadata, runnerScriptFiles } from '../services/script/runScript'
+import { afterPaint } from './activityState'
+import type { BatchSampleResult } from '../worker/messages'
 
 export interface ScriptExecutionOptions {
   /** Report in the output panel when every sample is already up to date. */
@@ -76,6 +78,33 @@ function finishExecution(appliedCount: number, total: number, errors: string[]):
     : `Execution finished successfully (${appliedCount} sample${appliedCount === 1 ? '' : 's'} applied).`)
 }
 
+/** Samples per worker request: small enough for steady progress, large enough to amortise the Python start-up. */
+const CHUNK_MAX_SAMPLES = 8
+const CHUNK_MAX_POINTS = 60_000
+
+function chunkByPoints<T extends { dataset: { data: { abscissa: ArrayLike<number> } } }>(items: T[]): T[][] {
+  const chunks: T[][] = []
+  let current: T[] = []
+  let points = 0
+  for (const item of items) {
+    const size = item.dataset.data.abscissa.length
+    if (current.length > 0 && (current.length >= CHUNK_MAX_SAMPLES || points + size > CHUNK_MAX_POINTS)) {
+      chunks.push(current)
+      current = []
+      points = 0
+    }
+    current.push(item)
+    points += size
+  }
+  if (current.length > 0) chunks.push(current)
+  return chunks
+}
+
+/**
+ * Sends the changed samples to the worker in chunks so progress advances and the UI can
+ * repaint between them, then applies every result in one store update: one re-render and
+ * one autosave regardless of the number of samples.
+ */
 async function runScriptExecution({ datasetIds, options }: ScriptExecutionRequest): Promise<void> {
   const state = get(appState)
   const precision = get(computePrecision)
@@ -97,88 +126,90 @@ async function runScriptExecution({ datasetIds, options }: ScriptExecutionReques
     return
   }
 
-  const sampleIds = selected.map(({ dataset }) => dataset.id)
   const labels = new Map(selected.map(({ dataset }) => [dataset.id, dataset.style.label]))
   const keys = new Map(selected.map(({ dataset, key }) => [dataset.id, key]))
-  appendScriptOutput(`Running processing for ${selected.length} changed sample${selected.length === 1 ? '' : 's'} (${precision}); ${candidates.length - selected.length} unchanged skipped.`)
+  const total = selected.length
+  appendScriptOutput(`Running processing for ${total} changed sample${total === 1 ? '' : 's'} (${precision}); ${candidates.length - total} unchanged skipped.`)
 
   patchRuntime({
     workerBusy: true,
     workerLastError: null,
-    scriptProgress: {
-      active: true,
-      completed: 0,
-      total: selected.length,
-      message: `Processing ${selected.length} sample${selected.length === 1 ? '' : 's'}`,
-    },
+    scriptProgress: { active: true, completed: 0, total, message: `Processing ${total} sample${total === 1 ? '' : 's'}` },
   })
+  await afterPaint()
 
   let appliedCount = 0
   const errors: string[] = []
+  const results: Array<Extract<BatchSampleResult, { ordinateModified: unknown }>> = []
   try {
-    const response = await workerClient.executeBatch({
-      runScript: buildRunScript(sampleIds),
-      scriptFiles,
-      samples: selected.map(({ dataset }) => ({
-        id: dataset.id,
-        abscissa: dataset.data.abscissa,
-        ordinate: dataset.data.ordinateOriginal,
-        metadata: runnerMetadata(dataset),
-      })),
-      preferFloat32: precision === 'float32',
-    })
-    if (response.type !== 'batch_result') {
-      const message = response.type === 'error' ? response.message : `worker returned ${response.type}`
-      errors.push(message)
-      appendScriptOutput(`Execution failed: ${message}`)
-      return
+    let processed = 0
+    for (const chunk of chunkByPoints(selected)) {
+      const response = await workerClient.executeBatch({
+        runScript: buildRunScript(chunk.map(({ dataset }) => dataset.id)),
+        scriptFiles,
+        samples: chunk.map(({ dataset }) => ({
+          id: dataset.id,
+          abscissa: dataset.data.abscissa,
+          ordinate: dataset.data.ordinateOriginal,
+          metadata: runnerMetadata(dataset),
+        })),
+        preferFloat32: precision === 'float32',
+      })
+      if (response.type !== 'batch_result') {
+        const message = response.type === 'error' ? response.message : `worker returned ${response.type}`
+        errors.push(message)
+        appendScriptOutput(`Execution failed: ${message}`)
+        return
+      }
+      for (const result of response.results) {
+        if ('error' in result) {
+          const label = labels.get(result.id) ?? result.id
+          errors.push(`${label}: ${result.error}`)
+          appendScriptOutput(`${label}: ${result.error}`)
+        } else {
+          results.push(result)
+        }
+      }
+      processed += chunk.length
+      const last = labels.get(chunk[chunk.length - 1].dataset.id) ?? ''
+      patchRuntime((runtime) => ({ scriptProgress: { ...runtime.scriptProgress, completed: processed, message: `Processed ${last}` } }))
+      await afterPaint()
     }
 
-    for (const result of response.results) {
-      const label = labels.get(result.id) ?? result.id
-      if ('error' in result) {
-        errors.push(`${label}: ${result.error}`)
-        appendScriptOutput(`${label}: ${result.error}`)
-        continue
-      }
-      let outcome = ''
-      let applied = false
-      appState.update((current) => {
+    const outcomes: string[] = []
+    appState.update((current) => {
+      const updates = new Map<string, AppState['datasets'][number]>()
+      for (const result of results) {
+        const label = labels.get(result.id) ?? result.id
         const item = current.datasets.find((candidate) => candidate.id === result.id)
         // Inputs edited during the run make this result obsolete; the follow-up run replaces it.
         if (!item || scriptExecutionKey(item, scriptFiles, precision) !== keys.get(result.id)) {
-          outcome = `${label}: inputs changed during execution; result discarded.`
-          return current
+          outcomes.push(`${label}: inputs changed during execution; result discarded.`)
+          continue
         }
-        let updated
         try {
-          updated = applyScriptResult(item, result)
+          const updated = applyScriptResult(item, result)
+          updates.set(updated.id, updated)
+          executionCache.remember(updated.id, keys.get(result.id) ?? '')
+          const removed = result.ordinateModified.filter((value) => Number.isNaN(value)).length
+          outcomes.push(`${label}: processed ${result.ordinateModified.length - removed} points${removed ? ` (${removed} outside the crop window)` : ''}.`)
         } catch (error) {
-          outcome = `${label}: ${error instanceof Error ? error.message : String(error)}`
-          errors.push(outcome)
-          return current
+          const message = `${label}: ${error instanceof Error ? error.message : String(error)}`
+          errors.push(message)
+          outcomes.push(message)
         }
-        appliedCount += 1
-        applied = true
-        executionCache.remember(updated.id, keys.get(result.id) ?? '')
-        const removed = result.ordinateModified.filter((value) => Number.isNaN(value)).length
-        outcome = `${label}: processed ${result.ordinateModified.length - removed} points${removed ? ` (${removed} outside the crop window)` : ''}.`
-        return persist({
-          ...current,
-          datasets: current.datasets.map((candidate) => candidate.id === updated.id ? updated : candidate),
-        })
-      })
-      if (applied) {
-        patchRuntime((runtime) => ({ scriptProgress: { ...runtime.scriptProgress, completed: appliedCount, message: `Processed ${label}` } }))
       }
-      appendScriptOutput(outcome)
-    }
+      appliedCount = updates.size
+      if (updates.size === 0) return current
+      return persist({ ...current, datasets: current.datasets.map((candidate) => updates.get(candidate.id) ?? candidate) })
+    })
+    appendScriptOutput(...outcomes)
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown script execution failure'
     errors.push(message)
     appendScriptOutput(`Execution failed: ${message}`)
   } finally {
-    finishExecution(appliedCount, selected.length, errors)
+    finishExecution(appliedCount, total, errors)
   }
 }
 

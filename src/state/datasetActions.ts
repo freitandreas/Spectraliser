@@ -1,4 +1,4 @@
-import { getSpectrumStyleDefaults, type AppState, type SpectrumDataset } from '../types/project'
+import { getSpectrumStyleDefaults, peakDetectionFor, type AppState, type SpectrumDataset } from '../types/project'
 import { appState, updateProject, commitDatasets, commitGuiEdit, mapDataset, createDatasetFromParsed, resolveProjectSpectrumType, resolveUniqueLabels } from './projectContext'
 import type { ParsedSpectrum } from '../services/import/parsers'
 import { canConvertAbscissa, convertAbscissa } from '../services/import/unitConversion'
@@ -97,6 +97,7 @@ export function updateDatasetMetadata(datasetId: string, partial: MetadataPatch)
         pipeline,
         style: nextStyle,
         experimentMetadata: partial.experimentMetadata ?? dataset.experimentMetadata,
+        peakDetection: dataset.peakDetection && peakDetectionFor(nextSpectrumType, dataset.peakDetection),
       }
     })
 

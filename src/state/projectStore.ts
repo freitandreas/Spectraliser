@@ -5,7 +5,7 @@ import { rerunPipeline, updateTransform } from './pipelineActions'
 import { executeScriptForDatasets, setScriptOverride, setPythonFileOverride, revertScriptToGuiState, confirmOverwriteForGuiEdits } from './scriptActions'
 import { updateDatasetMetadata, updateStyle, importDatasets, selectDataset, setActiveTab, removeDataset, linkExperimentMetadata } from './datasetActions'
 import { adviseSmoothing } from './autoParameterActions'
-import { detectPeaks, addPeakAtIndex, setPeakEnabled, removePeak, clearPeaks, updatePeakLabel, setPeakDetectionMode, updatePeakDetectionSettings } from './peakActions'
+import { detectPeaks, detectPeaksAfterImport, addPeakAtIndex, setPeakEnabled, removePeak, clearPeaks, updatePeakLabel, setPeakDetectionMode, updatePeakDetectionSettings } from './peakActions'
 
 function snapshot(): AppState { return get(appState) }
 
@@ -14,7 +14,7 @@ export const projectStore = {
   rerunPipeline, executeScriptForDatasets, updateDatasetMetadata, updateStyle,
   updateTransform, setScriptOverride, setPythonFileOverride, revertScriptToGuiState,
   confirmOverwriteForGuiEdits, importDatasets, selectDataset,
-  setActiveTab, removeDataset, linkExperimentMetadata, detectPeaks, addPeakAtIndex,
+  setActiveTab, removeDataset, linkExperimentMetadata, detectPeaks, detectPeaksAfterImport, addPeakAtIndex,
   setPeakEnabled, removePeak, clearPeaks, updatePeakLabel, setPeakDetectionMode, updatePeakDetectionSettings,
   adviseSmoothing, snapshot,
 }

@@ -1,4 +1,4 @@
-import { APP_SCHEMA_VERSION, DEFAULT_PEAK_DETECTION, type AppState, type Peak, type SpectrumDataset } from '../types/project'
+import { APP_SCHEMA_VERSION, DEFAULT_PEAK_DETECTION, peakDetectionFor, type AppState, type Peak, type SpectrumDataset } from '../types/project'
 import { buildPipeline } from './pipelineBlueprint'
 import { isSeriesTimeUnit } from '../services/seriesCoordinates'
 import { metadataKind } from '../services/metadataFields'
@@ -30,7 +30,7 @@ function migrateDataset({ seriesCoordinate, ...dataset }: LegacyDataset): Spectr
     experimentMetadata: migrateMetadata(dataset.experimentMetadata, seriesCoordinate),
     // Steps outside the current blueprint (e.g. the removed derivative) are dropped here.
     pipeline: buildPipeline(dataset.data.abscissa, dataset.pipeline ?? []),
-    peakDetection: dataset.peakDetection ?? { ...DEFAULT_PEAK_DETECTION },
+    peakDetection: peakDetectionFor(dataset.spectrumType, dataset.peakDetection ?? { ...DEFAULT_PEAK_DETECTION }),
     units: {
       ...dataset.units,
       xQuantity: dataset.units.xQuantity ?? 'Abscissa',

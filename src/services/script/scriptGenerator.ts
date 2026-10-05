@@ -1,4 +1,4 @@
-import type { SpectrumDataset } from '../../types/project'
+import { peakDetectionFor, type SpectrumDataset } from '../../types/project'
 import mainSource from '../../python/main.py?raw'
 import processingSource from '../../python/processing.py?raw'
 import sampleIoSource from '../../python/sample_io.py?raw'
@@ -35,7 +35,7 @@ export function generateSamplesJson(datasets: SpectrumDataset[], dataFiles: Reco
     units,
     style,
     pipeline,
-    peakDetection: peakDetection ?? null,
+    peakDetection: peakDetection ? peakDetectionFor(spectrumType, peakDetection) : null,
   }))
   return `${JSON.stringify(samples, null, 2)}\n`
 }

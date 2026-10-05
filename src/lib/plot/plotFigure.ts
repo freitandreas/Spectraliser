@@ -24,6 +24,8 @@ export interface PlotFigureInput {
   /** Point hovered in a linked view; drawn as a marker in heatmap and 3D modes. */
   hoverPoint?: HighlightState['hoverPoint']
   showPeaks?: boolean
+  /** Export view: every series drawn equally, no selection or link highlighting, peaks of all series. */
+  presentation?: boolean
 }
 
 export interface PlotFigure {
@@ -32,7 +34,6 @@ export interface PlotFigure {
   layout: Record<string, unknown>
   notices: string[]
   usesMath: boolean
-  generatedSeries: number
   /** Maps traces and grid rows back to measured dataset points (hover, picking, table sync). */
   links: PlotLinks
   /** Everything needed to update link highlighting without rebuilding the figure. */
@@ -101,7 +102,7 @@ function baseLayout(): Record<string, unknown> {
   }
 }
 
-function coordinateNotices(coordinates: ResolvedSeriesCoordinates, interpolationRequested: boolean): string[] {
+function coordinateNotices(coordinates: ResolvedSeriesCoordinates): string[] {
   if (coordinates.kind === 'measured') return []
   const notices: string[] = []
   const quantity = coordinates.quantity.toLowerCase()
@@ -114,7 +115,6 @@ function coordinateNotices(coordinates: ResolvedSeriesCoordinates, interpolation
   } else {
     notices.push(`No ${quantity} found for ${shown}${more}. Series are placed by their order; add it in the metadata box of the Data tab.`)
   }
-  if (interpolationRequested) notices.push(`Interpolation needs a ${quantity} for every visible series and is paused.`)
   return notices
 }
 
@@ -124,9 +124,8 @@ let gridCache: { datasets: SpectrumDataset[]; key: string; grid: SeriesGrid } | 
 export function seriesGridFor(
   datasets: SpectrumDataset[],
   coordinates: ResolvedSeriesCoordinates,
-  steps: number,
 ): SeriesGrid {
-  const key = `${steps}|${coordinates.values.join(',')}|${datasets.map((dataset) => dataset.style.label).join('\u0000')}`
+  const key = `${coordinates.values.join(',')}|${datasets.map((dataset) => dataset.style.label).join('\u0000')}`
   if (gridCache && gridCache.datasets === datasets && gridCache.key === key) return gridCache.grid
   const grid = buildSeriesGrid(
     datasets.map((dataset, index) => ({
@@ -135,33 +134,13 @@ export function seriesGridFor(
       abscissa: dataset.data.abscissa,
       ordinate: dataset.data.ordinateModified,
     })),
-    steps,
   )
   gridCache = { datasets, key, grid }
   return grid
 }
 
-function interpolatedOverlayTraces(grid: SeriesGrid, titles: AxisTitles, dataset: SpectrumDataset, lineWidth: number): Array<Record<string, unknown>> {
-  const xUnit = unitSuffix(dataset.units.x)
-  const yUnit = unitSuffix(dataset.units.y)
-  return grid.z.flatMap((row, index) => grid.generated[index]
-    ? [{
-        x: grid.x,
-        y: row,
-        type: 'scatter',
-        mode: 'lines',
-        name: `Interpolated · ${grid.coordinates[index].toPrecision(4)}`,
-        legendgroup: 'interpolated',
-        showlegend: !grid.generated.slice(0, index).some(Boolean),
-        line: { color: '#9aa3ab', width: Math.max(1, lineWidth * 0.6), dash: 'dot' },
-        opacity: 0.75,
-        hovertemplate: `%{x:.6g}${xUnit}<br>%{y:.6g}${yUnit}<extra>Interpolated (not measured)<br>${titles.series}: ${grid.coordinates[index].toPrecision(6)}</extra>`,
-      }]
-    : [])
-}
-
 function rowHoverText(grid: SeriesGrid): string[][] {
-  return grid.z.map((row, index) => row.map(() => grid.generated[index] ? 'Interpolated (not measured)' : grid.labels[index]))
+  return grid.z.map((row, index) => row.map(() => grid.labels[index]))
 }
 
 /**
@@ -171,19 +150,17 @@ function rowHoverText(grid: SeriesGrid): string[][] {
 export function buildPlotFigure(input: PlotFigureInput): PlotFigure {
   const { datasets, plotStyle } = input
   const requestedMode = plotStyle.plotMode
-  const interpolation = plotStyle.seriesInterpolation
   const coordinates = resolveSeriesAxis(
     datasets.map((dataset) => ({ label: dataset.style.label, metadata: dataset.experimentMetadata })),
     plotStyle.seriesField,
     plotStyle.seriesUnit,
   )
   const multiSeries = datasets.length >= 2
-  const notices: string[] = multiSeries ? coordinateNotices(coordinates, interpolation.enabled) : []
+  const notices: string[] = multiSeries ? coordinateNotices(coordinates) : []
   const normalisedCount = datasets.filter(isNormalised).length
   if (normalisedCount > 0 && normalisedCount < datasets.length) {
     notices.push(`Normalisation is enabled for ${normalisedCount} of ${datasets.length} visible series; the ordinate label shows the unnormalised quantity.`)
   }
-  const steps = interpolation.enabled && coordinates.kind === 'measured' ? interpolation.steps : 0
   const format = plotStyle.axisLabelFormat
   const notation = plotStyle.quantityNotation ?? 'name'
   // Hover labels are plain SVG text, so they always use the inline form.
@@ -196,10 +173,10 @@ export function buildPlotFigure(input: PlotFigureInput): PlotFigure {
   }
 
   let grid: SeriesGrid | null = null
-  if (multiSeries && (mode !== 'overlay' || steps > 0)) {
+  if (multiSeries && mode !== 'overlay') {
     try {
-      grid = seriesGridFor(datasets, coordinates, steps)
-      if (grid.resampled && mode !== 'overlay') {
+      grid = seriesGridFor(datasets, coordinates)
+      if (grid.resampled) {
         notices.push('Series were linearly resampled onto a shared abscissa within their common range for this view.')
       }
     } catch (error) {
@@ -207,15 +184,17 @@ export function buildPlotFigure(input: PlotFigureInput): PlotFigure {
       mode = 'overlay'
     }
   }
-  const generatedSeries = grid?.generated.filter(Boolean).length ?? 0
 
-  const selectedSpectrumId = input.selectedSpectrumId ?? null
+  const presentation = input.presentation === true
+  const selectedSpectrumId = presentation ? null : input.selectedSpectrumId ?? null
   const showPeaks = input.showPeaks !== false
-  const highlightState: HighlightState = {
-    highlightedDatasetId: input.highlightedDatasetId ?? null,
-    hoveredPeakId: input.hoveredPeakId ?? null,
-    hoverPoint: input.hoverPoint ?? null,
-  }
+  const highlightState: HighlightState = presentation
+    ? { highlightedDatasetId: null, hoveredPeakId: null, hoverPoint: null }
+    : {
+        highlightedDatasetId: input.highlightedDatasetId ?? null,
+        hoveredPeakId: input.hoveredPeakId ?? null,
+        hoverPoint: input.hoverPoint ?? null,
+      }
   const coordinateById = new Map(datasets.map((dataset, index) => [dataset.id, coordinates.values[index]]))
   const gridXRange = (seriesGrid: SeriesGrid): [number, number] => {
     let low = Number.POSITIVE_INFINITY
@@ -232,7 +211,7 @@ export function buildPlotFigure(input: PlotFigureInput): PlotFigure {
     grid: {
       traceIndex: 0,
       coordinates: seriesGrid.coordinates,
-      rowDatasetIds: seriesGrid.sources.map((source) => (source >= 0 ? datasets[source].id : null)),
+      rowDatasetIds: seriesGrid.sources.map((source) => datasets[source].id),
     },
   })
   const context = (patch: Partial<HighlightContext>): HighlightContext => ({
@@ -254,8 +233,8 @@ export function buildPlotFigure(input: PlotFigureInput): PlotFigure {
   const percentY = isPercentUnit(datasets[0]?.units.y ?? '')
 
   if (mode === 'surface3d' && grid) {
-    // WebGL scene titles render neither TeX nor markup, so they use unformatted text.
-    const titles = axisTitles(datasets, coordinates, format === 'fraction' ? 'slash' : format, notation, 'plain')
+    // WebGL scene titles cannot use MathJax; the scene target keeps symbols, subscripts and a stacked fraction.
+    const titles = axisTitles(datasets, coordinates, format, notation, 'scene')
     const colorbarTitle = axisTitles(datasets, coordinates, 'slash', notation).y
     let zLow = Number.POSITIVE_INFINITY
     let zHigh = Number.NEGATIVE_INFINITY
@@ -268,7 +247,7 @@ export function buildPlotFigure(input: PlotFigureInput): PlotFigure {
     const zSpan = zHigh > zLow ? zHigh - zLow : 0
     const xRange = gridXRange(grid)
     const sceneLift = zSpan * 0.004 * (reversedY ? -1 : 1)
-    const base = buildGridBase({ datasets, coordinates: coordinateById, xRange, selectedSpectrumId, showPeaks, traceOffset: 1, target: 'scene', sceneLift })
+    const base = buildGridBase({ datasets, coordinates: coordinateById, xRange, selectedSpectrumId, showPeaks, allPeaks: presentation, traceOffset: 1, target: 'scene', sceneLift })
     const highlight = context({
       xRange,
       peaksDatasetId: base.peaks?.datasetId ?? null,
@@ -285,7 +264,6 @@ export function buildPlotFigure(input: PlotFigureInput): PlotFigure {
       mode,
       notices,
       usesMath: false,
-      generatedSeries,
       links: gridLinks(grid, base),
       highlight,
       traces: [{
@@ -318,7 +296,7 @@ export function buildPlotFigure(input: PlotFigureInput): PlotFigure {
 
   if (mode === 'heatmap' && grid) {
     const xRange = gridXRange(grid)
-    const base = buildGridBase({ datasets, coordinates: coordinateById, xRange, selectedSpectrumId, showPeaks, traceOffset: 1, target: 'cartesian' })
+    const base = buildGridBase({ datasets, coordinates: coordinateById, xRange, selectedSpectrumId, showPeaks, allPeaks: presentation, traceOffset: 1, target: 'cartesian' })
     const highlight = context({
       xRange,
       peaksDatasetId: base.peaks?.datasetId ?? null,
@@ -329,11 +307,12 @@ export function buildPlotFigure(input: PlotFigureInput): PlotFigure {
       mode,
       notices,
       usesMath,
-      generatedSeries,
       links: gridLinks(grid, base),
       highlight,
       traces: [{
         type: 'heatmap',
+        // Bilinear shading between measured rows replaces generated intermediate spectra.
+        zsmooth: 'best',
         x: grid.x,
         y: grid.coordinates,
         z: grid.z,
@@ -360,20 +339,24 @@ export function buildPlotFigure(input: PlotFigureInput): PlotFigure {
     highlightState.highlightedDatasetId,
     undefined,
     plotStyle.seriesMode,
+    presentation,
   ).map((trace) => ({ ...trace }))
-  const peaksDataset = showPeaks ? datasets.find((dataset) => dataset.id === selectedSpectrumId) ?? null : null
+  const peaksDataset = showPeaks && !presentation ? datasets.find((dataset) => dataset.id === selectedSpectrumId) ?? null : null
   const peakTrace: PeakTraceLink | null = peaksDataset
     ? { traceIndex: traces.length, datasetId: peaksDataset.id, peakIds: peaksDataset.peaks.map((peak) => peak.id) }
     : null
   if (peaksDataset) traces.push({ ...buildPeakTrace(peaksDataset, peaksDataset.peaks, null) })
-  if (grid && steps > 0) traces.push(...interpolatedOverlayTraces(grid, hoverTitles(), datasets[0], plotStyle.lineWidth))
-  const overlayHighlight = context({ peaksDatasetId: peaksDataset?.id ?? null, baseAnnotations: buildPeakAnnotations(peaksDataset) })
+  const exportPeakDatasets = showPeaks && presentation ? datasets.filter((dataset) => dataset.peaks.length > 0) : []
+  for (const dataset of exportPeakDatasets) traces.push({ ...buildPeakTrace(dataset, dataset.peaks, null), showlegend: false })
+  const peakAnnotations = presentation
+    ? exportPeakDatasets.flatMap((dataset) => buildPeakAnnotations(dataset))
+    : buildPeakAnnotations(peaksDataset)
+  const overlayHighlight = context({ peaksDatasetId: peaksDataset?.id ?? null, baseAnnotations: peakAnnotations })
 
   return {
     mode,
     notices,
     usesMath,
-    generatedSeries,
     links: {
       seriesTraces: datasets.map((dataset, traceIndex) => ({ traceIndex, datasetId: dataset.id })),
       peakTrace,

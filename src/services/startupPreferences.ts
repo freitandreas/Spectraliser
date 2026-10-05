@@ -18,12 +18,6 @@ export type PlotMode = 'overlay' | 'heatmap' | 'surface3d'
 /** Numeric precision of arrays handed to the Python worker. */
 export type ComputePrecision = 'float32' | 'float64'
 
-export interface SeriesInterpolationPreferences {
-  enabled: boolean
-  /** Generated intermediate spectra inserted between each pair of neighbouring measured series. */
-  steps: number
-}
-
 export interface PlotStylePreferences {
   template: PlotStyleTemplate
   showGrid: boolean
@@ -38,7 +32,6 @@ export interface PlotStylePreferences {
   seriesField: string
   /** Target unit of the third axis (time or concentration); custom fields keep their own unit. */
   seriesUnit: string
-  seriesInterpolation: SeriesInterpolationPreferences
 }
 
 export interface StartupAxisPreferences {
@@ -54,8 +47,6 @@ export interface StartupPreferences {
   plotStyle: PlotStylePreferences
   computePrecision: ComputePrecision
 }
-
-export const MAX_INTERPOLATION_STEPS = 20
 
 export const DEFAULT_STARTUP_PREFERENCES: StartupPreferences = {
   spectrumType: 'uv-vis',
@@ -88,7 +79,6 @@ export function preferencesForTemplate(template: PlotStyleTemplate): PlotStylePr
     quantityNotation: 'name',
     seriesField: 'time',
     seriesUnit: 's',
-    seriesInterpolation: { enabled: false, steps: 1 },
   }
 }
 
@@ -101,9 +91,6 @@ function normalizePlotStyle(value: unknown): PlotStylePreferences {
   const template: PlotStyleTemplate = raw.template === 'minimal' || raw.template === 'framed' ? raw.template : 'grid'
   const defaults = preferencesForTemplate(template)
   const seriesField = typeof raw.seriesField === 'string' && raw.seriesField.trim() ? raw.seriesField.trim() : 'time'
-  const rawInterpolation = raw.seriesInterpolation && typeof raw.seriesInterpolation === 'object'
-    ? raw.seriesInterpolation as Partial<SeriesInterpolationPreferences>
-    : {}
   return {
     template,
     showGrid: typeof raw.showGrid === 'boolean' ? raw.showGrid : defaults.showGrid,
@@ -119,18 +106,12 @@ function normalizePlotStyle(value: unknown): PlotStylePreferences {
     seriesUnit: fieldKind(seriesField) === 'custom'
       ? ''
       : isSupportedSeriesUnit(seriesField, raw.seriesUnit ?? '') ? raw.seriesUnit! : defaultUnitForKind(fieldKind(seriesField)),
-    seriesInterpolation: {
-      enabled: rawInterpolation.enabled === true,
-      steps: typeof rawInterpolation.steps === 'number' && Number.isFinite(rawInterpolation.steps)
-        ? Math.min(MAX_INTERPOLATION_STEPS, Math.max(1, Math.round(rawInterpolation.steps)))
-        : defaults.seriesInterpolation.steps,
-    },
   }
 }
 
 /**
  * Accepts every saved shape since v1. Removed fields (auto-detect, label template,
- * import interpolation) are ignored; a saved `auto` spectrum type falls back to UV-Vis.
+ * import and series interpolation) are ignored; a saved `auto` spectrum type falls back to UV-Vis.
  */
 export function normalizeStartupPreferences(value: unknown): StartupPreferences {
   const saved = value && typeof value === 'object' ? value as Record<string, unknown> : {}

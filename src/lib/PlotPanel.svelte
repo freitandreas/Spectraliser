@@ -8,6 +8,7 @@
   import { pointKey, resolveGridPoint, type DatasetPoint } from './plot/plotLinks'
   import { highlightShapes, sceneSlotRestyle, sceneSlots, type HighlightState } from './plot/highlightLayer'
   import { createPeakZoom } from './plot/peakZoom'
+  import { applyExportAppearance, applyExportTraceTheme, type ExportAppearance } from './plot/exportAppearance'
 
   export let datasets: SpectrumDataset[] = []
   export let selectedSpectrumId: string | null = null
@@ -17,6 +18,8 @@
   export let peakZoomPeakId: string | null = null
   export let highlightedDatasetId: string | null = null
   export let plotStyle: PlotStylePreferences
+  export let appearance: ExportAppearance | null = null
+  export let rendering = false
 
   const dispatch = createEventDispatcher<{
     hoverpoint: DatasetPoint | null
@@ -34,6 +37,7 @@
     Fx?: { hover: (target: HTMLDivElement, points: Array<{ curveNumber: number; pointNumber: number }>) => void; unhover: (target: HTMLDivElement) => void }
     restyle?: (target: HTMLDivElement, update: Record<string, unknown>, indices: number[]) => Promise<unknown>
     relayout?: (target: HTMLDivElement, update: Record<string, unknown>) => Promise<unknown>
+    toImage?: (target: HTMLDivElement, options?: Record<string, unknown>) => Promise<string>
     purge?: (target: HTMLDivElement) => void
     Plots?: { resize: (target: HTMLDivElement) => void }
   }
@@ -169,6 +173,7 @@
   async function renderPlot(): Promise<void> {
     if (!container) return
     const generation = ++renderGeneration
+    rendering = true
     plotReady = false
     peakZoom.reset()
     lastAppliedPeakZoomId = undefined
@@ -195,18 +200,28 @@
     links = figure.links
     highlight = figure.highlight
 
-    await plotly.react(container, figure.traces, figure.layout, { displaylogo: false, responsive: true })
-    if (generation !== renderGeneration || !container) return
+    const traces = appearance ? applyExportTraceTheme(figure.traces, appearance) : figure.traces
+    const layout = appearance ? applyExportAppearance(figure.layout, appearance) : figure.layout
+    // Static SVG export previews are non-interactive; keep 3D interactive because static gl3d draws only in toImage.
+    const config = appearance
+      ? { displaylogo: false, displayModeBar: false, staticPlot: figure.mode !== 'surface3d', responsive: false }
+      : { displaylogo: false, responsive: true }
+    try {
+      await plotly.react(container, traces, layout, config)
+      if (generation !== renderGeneration || !container) return
 
-    plotReady = true
-    // The figure already contains the highlight state it was built with.
-    applied = stateKeys(state)
-    attachHandlers()
-    if (renderedMode === 'overlay') {
-      applied.hover = ''
-      applyOverlayHover(state)
+      plotReady = true
+      // The figure already contains the highlight state it was built with.
+      applied = stateKeys(state)
+      attachHandlers()
+      if (renderedMode === 'overlay') {
+        applied.hover = ''
+        applyOverlayHover(state)
+      }
+      scheduleHighlights()
+    } finally {
+      if (generation === renderGeneration) rendering = false
     }
-    scheduleHighlights()
   }
 
   function applyOverlayHover(state: HighlightState): void {
@@ -274,7 +289,7 @@
   }
 
   function checkRender(..._dependencies: unknown[]): void {
-    const key = JSON.stringify(plotStyle)
+    const key = JSON.stringify({ plotStyle, appearance })
     if (!plotReady || (lastRenderedDatasets === datasets && lastRenderedSelection === selectedSpectrumId && key === renderKey)) return
     lastRenderedDatasets = datasets
     lastRenderedSelection = selectedSpectrumId
@@ -283,6 +298,18 @@
   }
   let lastRenderedDatasets: SpectrumDataset[] | null = null
   let lastRenderedSelection: string | null = null
+
+  export async function toImage(scale = 1): Promise<string> {
+    if (!container || !plotReady || !plotly.toImage) throw new Error('The plot preview is not ready yet.')
+    const width = appearance?.width ?? container.clientWidth
+    const height = appearance?.height ?? container.clientHeight
+    return plotly.toImage(container, {
+      format: 'png',
+      width: Math.max(1, Math.round(width * scale)),
+      height: Math.max(1, Math.round(height * scale)),
+      scale: 1,
+    })
+  }
 
   onMount(() => {
     if (container && typeof ResizeObserver !== 'undefined') {
@@ -293,7 +320,7 @@
     }
     lastRenderedDatasets = datasets
     lastRenderedSelection = selectedSpectrumId
-    renderKey = JSON.stringify(plotStyle)
+    renderKey = JSON.stringify({ plotStyle, appearance })
     void renderPlot()
 
     return () => {
@@ -304,7 +331,7 @@
     }
   })
 
-  $: if (container) checkRender(datasets, selectedSpectrumId, plotStyle, plotReady)
+  $: if (container) checkRender(datasets, selectedSpectrumId, plotStyle, appearance, plotReady)
 
   $: if (container && plotReady) scheduleHighlights(highlightedDatasetId, peakHoverSelection, hoverSelection)
 
@@ -316,7 +343,7 @@
 </script>
 
 <div class="plot-shell">
-  <div class="plotly-panel" bind:this={container}></div>
+  <div class="plotly-panel" class:static-export={appearance !== null} bind:this={container}></div>
   {#if notices.length > 0}
     <ul class="plot-notices" aria-live="polite">
       {#each notices as notice}<li>{notice}</li>{/each}
@@ -334,6 +361,10 @@
   .plotly-panel {
     width: 100%;
     height: 100%;
+  }
+
+  .plotly-panel.static-export {
+    pointer-events: none;
   }
 
   .plot-notices {

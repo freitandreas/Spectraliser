@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   DEFAULT_STARTUP_PREFERENCES,
-  MAX_INTERPOLATION_STEPS,
   hasCompletedStartupWizard,
   loadStartupPreferences,
   normalizeStartupPreferences,
@@ -22,7 +21,6 @@ describe('startup preferences', () => {
       axisLabelFormat: 'slash',
       seriesField: 'time',
       seriesUnit: 's',
-      seriesInterpolation: { enabled: false, steps: 1 },
     })
     expect(hasCompletedStartupWizard()).toBe(false)
   })
@@ -40,7 +38,6 @@ describe('startup preferences', () => {
         axisLabelFormat: 'fraction' as const,
         seriesField: 'concentration',
         seriesUnit: 'µM',
-        seriesInterpolation: { enabled: true, steps: 3 },
       },
     }
 
@@ -88,7 +85,7 @@ describe('startup preferences', () => {
     expect(normalizeStartupPreferences({ computePrecision: 'float64' }).computePrecision).toBe('float64')
   })
 
-  it('clamps interpolation steps and rejects invalid plot settings', () => {
+  it('drops removed series interpolation and rejects invalid plot settings', () => {
     const normalized = normalizeStartupPreferences({
       ...DEFAULT_STARTUP_PREFERENCES,
       plotStyle: {
@@ -101,7 +98,7 @@ describe('startup preferences', () => {
       },
     })
 
-    expect(normalized.plotStyle.seriesInterpolation).toEqual({ enabled: true, steps: MAX_INTERPOLATION_STEPS })
+    expect(normalized.plotStyle).not.toHaveProperty('seriesInterpolation')
     expect(normalized.plotStyle).toMatchObject({ seriesMode: 'lines', plotMode: 'overlay', axisLabelFormat: 'slash', seriesUnit: 's' })
   })
 

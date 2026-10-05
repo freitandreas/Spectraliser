@@ -8,6 +8,8 @@
   import SampleDataTable from './SampleDataTable.svelte'
   import PeakWorkspace from './PeakWorkspace.svelte'
   import ScriptWorkspace from './ScriptWorkspace.svelte'
+  import ExportPreview from './ExportPreview.svelte'
+  import type { ExportSettings } from '../../services/export/exportSettings'
   import type { PlotStylePreferences } from '../../services/startupPreferences'
   import { peakSingleSeriesView } from '../../state/displaySettings'
   import { singleSeriesView, type PlotView } from '../plot/singleSeriesView'
@@ -29,9 +31,12 @@
   export let onCloseTab: (tabId: string) => void
   export let onCloseBottomPanel: () => void
   export let onLinkMetadata: (() => void) | null = null
+  export let exportPreviewOpen = false
+  export let exportSettings: ExportSettings
 
   let mainEl: HTMLElement | null = null
   let scriptWorkspace: ScriptWorkspace | null = null
+  let exportPreview: ExportPreview | null = null
   let hoverSelection: { datasetId: string; pointIndex: number } | null = null
   let peakHoverSelection: { datasetId: string; peakId: string } | null = null
   let peakZoomPeakId: string | null = null
@@ -148,12 +153,17 @@
   export function getMainHeight(): number {
     return mainEl?.clientHeight ?? 0
   }
+
+  export function getExportPlotImage(): Promise<string> {
+    if (!exportPreview) return Promise.reject(new Error('The export preview is not open.'))
+    return exportPreview.getPlotImage()
+  }
 </script>
 
 <main
   class="main"
   bind:this={mainEl}
-  style={`grid-template-rows:minmax(220px, 1fr) ${bottomPanelOpen ? 8 : 0}px ${bottomPanelOpen ? bottomPanelHeight : 0}px;`}
+  style={`grid-template-rows:minmax(${exportPreviewOpen ? 120 : 220}px, 1fr) ${bottomPanelOpen ? 8 : 0}px ${bottomPanelOpen ? bottomPanelHeight : 0}px;`}
 >
   <section class="plot-shell" role="presentation" on:click={clearSelection}>
     <PlotPanel
@@ -179,47 +189,58 @@
     on:mousedown={onStartBottomResize}
   ></button>
 
-  <section class="bottom-panel" class:hidden={!bottomPanelOpen}>
-    <WorkspaceTabs
-      {openedSampleTabs}
-      {activeWorkspaceTab}
-      onOpenSubTab={onOpenSubTab}
-      onActivateScript={activateScript}
-      onCloseTab={onCloseTab}
-      onClosePanel={onCloseBottomPanel}
-    />
+  <section class="bottom-panel" class:hidden={!bottomPanelOpen} class:export-mode={exportPreviewOpen}>
+    {#if exportPreviewOpen}
+      <ExportPreview
+        bind:this={exportPreview}
+        state={$projectStore}
+        datasets={visibleDatasets}
+        {plotStyle}
+        settings={exportSettings}
+        onClose={onCloseBottomPanel}
+      />
+    {:else}
+      <WorkspaceTabs
+        {openedSampleTabs}
+        {activeWorkspaceTab}
+        onOpenSubTab={onOpenSubTab}
+        onActivateScript={activateScript}
+        onCloseTab={onCloseTab}
+        onClosePanel={onCloseBottomPanel}
+      />
 
-    {#if activeWorkspaceTab !== 'script_view' && activeSampleTabDataset}
-      <div class="sample-shell">
-        {#if activeSampleSubView === 'data'}
-          <SampleDataTable
-            dataset={activeSampleTabDataset}
-            {hoverSelection}
-            onHover={setHoverSelection}
-            {onLinkMetadata}
-          />
-        {:else}
-          <PeakWorkspace
-            dataset={activeSampleTabDataset}
-            {peakHoverSelection}
-            onPeakHover={setPeakHover}
-            bind:prominence={peakProminence}
-            bind:minDistance={peakMinDistance}
-            bind:minHeight={peakMinHeight}
-            bind:mode={peakMode}
-            bind:auto={peakAuto}
-            onModeChange={handlePeakModeChange}
-            onParametersChange={handlePeakParametersChange}
-            onDetectionComplete={triggerScriptExecution}
-          />
-        {/if}
-      </div>
+      {#if activeWorkspaceTab !== 'script_view' && activeSampleTabDataset}
+        <div class="sample-shell">
+          {#if activeSampleSubView === 'data'}
+            <SampleDataTable
+              dataset={activeSampleTabDataset}
+              {hoverSelection}
+              onHover={setHoverSelection}
+              {onLinkMetadata}
+            />
+          {:else}
+            <PeakWorkspace
+              dataset={activeSampleTabDataset}
+              {peakHoverSelection}
+              onPeakHover={setPeakHover}
+              bind:prominence={peakProminence}
+              bind:minDistance={peakMinDistance}
+              bind:minHeight={peakMinHeight}
+              bind:mode={peakMode}
+              bind:auto={peakAuto}
+              onModeChange={handlePeakModeChange}
+              onParametersChange={handlePeakParametersChange}
+              onDetectionComplete={triggerScriptExecution}
+            />
+          {/if}
+        </div>
+      {/if}
+
+      <ScriptWorkspace
+        bind:this={scriptWorkspace}
+        active={activeWorkspaceTab === 'script_view'}
+        executionTrigger={scriptExecutionTrigger}
+      />
     {/if}
-
-    <ScriptWorkspace
-      bind:this={scriptWorkspace}
-      active={activeWorkspaceTab === 'script_view'}
-      executionTrigger={scriptExecutionTrigger}
-    />
   </section>
 </main>

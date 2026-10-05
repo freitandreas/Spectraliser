@@ -102,13 +102,19 @@ function texUnit(unit: string): string {
     .replace(/ /g, '\\,')
 }
 
-export type AxisLabelTarget = 'plotly' | 'plain'
+export type AxisLabelTarget = 'plotly' | 'plain' | 'scene'
+
+/** Plotly's WebGL text understands `<i>`, `<sub>` and `<br>` but not HTML entities. */
+function sceneText(html: string): string {
+  return html.replace(/&#(\d+);/g, (_, code: string) => String.fromCharCode(Number(code)))
+}
 
 /**
  * Renders an axis title in the selected IUPAC-style form. Dimensionless axes show the
  * quantity alone; `subscript` adds a descriptive subscript such as "norm". The fraction
  * form is TeX for Plotly's MathJax renderer; the `plain` target never emits markup or
- * TeX, for WebGL titles, CSV headers and form examples.
+ * TeX, for CSV headers and form examples. The `scene` target is for 3D titles, where
+ * MathJax is unavailable: markup is kept and a fraction is stacked over a rule.
  */
 export function axisLabel(
   quantity: string,
@@ -119,6 +125,16 @@ export function axisLabel(
   subscript?: string,
 ): string {
   const formatted = formatUnit(unit).trim()
+  if (target === 'scene') {
+    const name = sceneText(quantityHtml(quantity, notation, subscript))
+    if (!formatted) return name
+    if (format === 'in') return `${name} in ${formatted}`
+    if (format === 'fraction') {
+      const width = Math.max(quantityPlain(quantity, notation, subscript).length, formatted.length)
+      return `${name}<br>${'─'.repeat(Math.max(2, Math.ceil(width * 0.9)))}<br>${formatted}`
+    }
+    return `${name} / ${formatted}`
+  }
   const name = target === 'plain' ? quantityPlain(quantity, notation, subscript) : quantityHtml(quantity, notation, subscript)
   if (!formatted) return name
   const unitText = target === 'plain' ? formatted : escapeHtml(formatted)

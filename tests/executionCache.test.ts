@@ -17,7 +17,7 @@ describe('scriptExecutionKey', () => {
     expect(scriptExecutionKey(restyled, { ...files, 'samples.json': '[{"label":"Other"}]' }, 'float32')).toBe(key)
   })
 
-  it('changes for every script input', () => {
+  it('changes for every processing-relevant input', () => {
     const base = buildDataset()
     const key = scriptExecutionKey(base, files, 'float32')
     const variants = [
@@ -25,12 +25,30 @@ describe('scriptExecutionKey', () => {
       scriptExecutionKey(base, { ...files, 'processing.py': 'x = 2' }, 'float32'),
       scriptExecutionKey({ ...base, units: { ...base.units, x: 'cm⁻¹', y: 'Absorbance' } }, files, 'float32'),
       scriptExecutionKey({ ...base, pipeline: [] }, files, 'float32'),
-      scriptExecutionKey({ ...base, peakDetection: { prominence: 0.2, minDistance: 1, minHeight: null, mode: 'maxima' } }, files, 'float32'),
       scriptExecutionKey({ ...base, data: { ...base.data, ordinateOriginal: [...base.data.ordinateOriginal] } }, files, 'float32'),
       scriptExecutionKey({ ...base, spectrumType: 'ir' }, files, 'float32'),
     ]
     for (const variant of variants) expect(variant).not.toBe(key)
     expect(new Set(variants).size).toBe(variants.length)
+  })
+
+  it('uses peak settings only for IR samples', () => {
+    const base = buildDataset()
+    const uv = scriptExecutionKey(base, files, 'float32')
+    const uvChanged = scriptExecutionKey(
+      { ...base, peakDetection: { prominence: 0.2, minDistance: 1, minHeight: null, mode: 'maxima' } },
+      files,
+      'float32',
+    )
+    expect(uvChanged).toBe(uv)
+
+    const ir = scriptExecutionKey({ ...base, spectrumType: 'ir' }, files, 'float32')
+    const irChanged = scriptExecutionKey(
+      { ...base, spectrumType: 'ir', peakDetection: { prominence: 0.2, minDistance: 1, minHeight: null, mode: 'maxima' } },
+      files,
+      'float32',
+    )
+    expect(irChanged).not.toBe(ir)
   })
 })
 

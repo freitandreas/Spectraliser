@@ -1,5 +1,6 @@
 <script lang="ts">
   import { runtimeState } from '../../state/runtimeState'
+  import { currentActivity } from '../../state/activityState'
   export let leftPanelOpen: boolean
   export let allDatasetsVisible = false
   export let selectedDatasetId: string | null = null
@@ -71,6 +72,18 @@
           <span style={`width:${$runtimeState.scriptProgress.total > 0 ? ($runtimeState.scriptProgress.completed / $runtimeState.scriptProgress.total) * 100 : 0}%;`}></span>
         </div>
         <div class="script-progress-count">{$runtimeState.scriptProgress.completed}/{$runtimeState.scriptProgress.total}</div>
+      </div>
+    {:else if $currentActivity}
+      <div class="script-progress" role="status" aria-live="polite">
+        <div class="script-progress-label">
+          {$currentActivity.message}{$currentActivity.others > 0 ? ` (+${$currentActivity.others} more)` : ''}
+        </div>
+        <div class="script-progress-track" class:indeterminate={$currentActivity.total === null} aria-hidden="true">
+          <span style={$currentActivity.total ? `width:${($currentActivity.completed / $currentActivity.total) * 100}%;` : ''}></span>
+        </div>
+        <div class="script-progress-count">
+          {$currentActivity.total ? `${$currentActivity.completed}/${$currentActivity.total}` : ''}
+        </div>
       </div>
     {/if}
   </div>

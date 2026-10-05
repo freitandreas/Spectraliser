@@ -24,10 +24,14 @@ fields there as *Time* (number or `HH:MM:SS` with a unit), *Concentration*
 concentration or any numeric custom field can be chosen as the third axis of
 heatmap and 3D plots in General settings → Appearance; time and concentration
 are converted into the chosen axis unit, and series without a usable value are
-placed by their order with a notice. Rows that are peaks are flagged ⚑ in the
+placed by their order with a notice. Only measured series are plotted: heatmaps
+shade bilinearly between neighbouring series and the 3D surface mesh joins
+them, so no synthetic spectra are generated. 3D axis titles keep symbols and
+subscripts; because WebGL cannot typeset TeX, the fraction label style is drawn
+as quantity over a rule over the unit. Rows that are peaks are flagged ⚑ in the
 data table.
 
-Use **Metadata** in the toolbar to import an experiment table from CSV. Choose
+Use **Data → Metadata** to import an experiment table from CSV. Choose
 the table delimiter, the dataset field to match, and the corresponding key
 column. Matches are exact and case-sensitive; duplicate keys in the table,
 missing keys, unmatched keys, and non-unique dataset keys are reported and
@@ -41,6 +45,46 @@ individual label visible in the data table), not the shared file name or source
 path. Dataset IDs are shown in each dataset's metadata box and can also be used
 when preparing an ID-keyed table. Linked fields are displayed below the
 numerical data table and are saved with the project/autosave.
+
+## Export
+
+Choose **Export** to open export settings in the right panel and a live preview
+in the bottom panel. Figure width and height are set in centimetres; presets
+cover a 16:9 presentation slide (25.4 × 14.29 cm), a single paper column
+(8.5 × 5.7 cm) and a full paper width (17.8 × 11.9 cm). The figure is laid out
+at its physical size, so the chosen font size in pt matches the slide or
+document. The preview scales the whole figure to the available space without
+cropping, and PNG exports render it at the selected resolution. 3D plots use
+the camera orientation and zoom last set in the workspace plot.
+Closing export restores the previous bottom-panel height and workspace.
+Exported plots draw every series equally, without the selection or hover
+highlighting of the workspace plot. **Show peaks of all series** adds the
+detected peaks of every exported series.
+
+Reports (PDF, HTML, LaTeX) contain the plot followed by a **Measurement and
+processing** section listing the spectrum type, sample count and axes shared by
+all samples, the general pipeline settings and the peak detection parameters.
+A section for each sample then lists its metadata, the processing steps whose
+settings differ from the general pipeline (omitted when there are none), and
+its table of enabled peaks. **Peak table columns** selects the visible columns
+(default: position, ordinate, IR intensity and assignment; prominence, FWHM and
+area are optional). Each peak table caption states the detection parameters
+used and how many peaks were added or removed manually.
+The table exports contain the same tables: LaTeX (`booktabs`, `tabularx`,
+`adjustbox`, `caption`) or an Excel workbook that also includes the spectral data.
+
+Plot rendering, report preparation and peak detection on import run after the
+interface has updated: a loading overlay covers the plot or export preview
+until it can be used, and the progress bar in the header shows the running work.
+
+Other outputs are a Python project ZIP with source data, a CSV summary and a
+JSON project snapshot. The PDF opens the browser's print dialog, where the
+destination can be set to “Save to PDF”. The LaTeX report ZIP contains
+`report.tex` and `plot.png` and compiles with XeLaTeX/LuaLaTeX (`fontspec`).
+
+Imported samples are processed by the current pipeline, and peaks are then
+detected automatically on the processed signal. Detection settings can be
+refined per sample in the peak panel.
 
 ## Editable Python files
 
