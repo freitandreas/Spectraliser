@@ -28,9 +28,10 @@
   import HelpTip from './HelpTip.svelte'
 
   export let open = false
+  export let suspended = false
   export let initialPreferences: StartupPreferences = DEFAULT_STARTUP_PREFERENCES
 
-  const dispatch = createEventDispatcher<{ complete: StartupPreferences }>()
+  const dispatch = createEventDispatcher<{ complete: StartupPreferences; tour: void }>()
   let draft: StartupPreferences = structuredClone(DEFAULT_STARTUP_PREFERENCES)
   let step: 'defaults' | 'advanced' = 'defaults'
   let advancedView: 'appearance' | 'computation' = 'appearance'
@@ -90,7 +91,7 @@
   }
 </script>
 
-{#if open}
+{#if open && !suspended}
   <div class="startup-backdrop" role="presentation">
     <div class="startup-dialog" role="dialog" aria-modal="true" aria-labelledby="startup-title">
       <header class="startup-header">
@@ -227,6 +228,7 @@
         {#if step === 'defaults'}
           <span>Everything can be changed later in General Settings.</span>
           <div class="footer-actions">
+            <button type="button" class="ghost" on:click={() => dispatch('tour')}>Take a tour</button>
             <button type="button" class="ghost" on:click={() => { step = 'advanced' }}>Advanced settings</button>
             <button type="button" class="run" on:click={complete}>Continue to workspace</button>
           </div>

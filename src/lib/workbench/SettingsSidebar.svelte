@@ -60,6 +60,16 @@
   let differencesOpen = false
   let differencesFocus: SettingKey[] = []
 
+  export function captureView(): () => void {
+    const saved = { sampleTab, generalTab, view, shownDatasetId }
+    return () => { ({ sampleTab, generalTab, view, shownDatasetId } = saved) }
+  }
+
+  export function showGeneralSection(section: 'axes' | 'processing'): void {
+    view = 'general'
+    generalTab = section
+  }
+
   // A newly selected sample always opens on its own settings.
   $: syncSelectedSample(dataset?.id ?? null)
   function syncSelectedSample(id: string | null): void {

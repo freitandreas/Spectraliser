@@ -13,6 +13,7 @@
   export let onShowScript: () => void
   export let onShowSettings: () => void
   export let onExport: () => void
+  export let onStartTour: () => void
   export let onLinkMetadata: () => void
   export let datasetCount = 0
 </script>
@@ -58,7 +59,8 @@
     <button
       type="button"
       class="toolbar-button"
-      title="Use the Import Wizard, Script View, and Sample Settings to configure analysis."
+      title="Start a guided tour with five synthetic spectra."
+      on:click={onStartTour}
     >
       About/Help
     </button>

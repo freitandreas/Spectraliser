@@ -171,7 +171,7 @@ workerClient.init().catch((error: unknown) => {
   patchRuntime({ workerLastError: error instanceof Error ? error.message : 'Failed to initialize Pyodide worker' })
 })
 
-void loadAutosave().then((saved) => {
+export const projectReady = loadAutosave().then((saved) => {
   if (!saved) return
   const migrated = migrateProjectState(saved)
   appState.set(migrated.scriptSyncEnabled

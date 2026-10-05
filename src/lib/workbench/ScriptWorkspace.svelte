@@ -9,6 +9,7 @@
   import { projectStore } from '../../state/projectStore'
   import { computePrecision } from '../../state/computeSettings'
   import { runtimeState } from '../../state/runtimeState'
+  import { tourActive } from '../../state/tourState'
   import { arrayId } from '../../services/arrayIdentity'
   import {
     effectivePythonFiles,
@@ -32,6 +33,12 @@
   let outputViewActive = false
   let lastExecutionTrigger = executionTrigger
   let lastScriptInputSignature = ''
+
+  $: if ($tourActive) {
+    if (autoExecuteTimer !== null) window.clearTimeout(autoExecuteTimer)
+    autoExecuteTimer = null
+    pendingAutoRun = false
+  }
 
   $: files = effectivePythonFiles(
     $projectStore.datasets,
@@ -138,7 +145,7 @@
   }
 
   function scheduleAutoExecute(): void {
-    if (!autoExecute) return
+    if (!autoExecute || $tourActive) return
     if (executing) {
       pendingAutoRun = true
       return
@@ -151,7 +158,7 @@
   }
 
   function handleEditorBlur(): void {
-    if (!autoExecute) return
+    if (!autoExecute || $tourActive) return
     if (executing) {
       pendingAutoRun = true
       return
@@ -181,7 +188,7 @@
   }
 
   async function executeAutoMode(): Promise<void> {
-    if (executing || $projectStore.datasets.length === 0) return
+    if (executing || $tourActive || $projectStore.datasets.length === 0) return
 
     executing = true
     pendingAutoRun = false

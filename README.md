@@ -16,6 +16,22 @@ Run the scientific rule tests with:
 PYTHONPATH=src/python python3 -m unittest discover -s tests -p 'test_*.py'
 ```
 
+## Guided tour
+
+Choose **Take a tour** during setup or **About/Help** in the toolbar to open
+the guided walkthrough. It explains import, sample management, plotting,
+data and metadata, shared settings, heatmaps, processing, peaks, Python and
+export using five deterministic synthetic UV-Vis series with time and
+concentration metadata. The demo curves and manually marked bands are
+illustrative, not experimental measurements or detection results.
+
+Use **Next** and **Back** to navigate. **Finish**, **Exit tour**, or **Escape**
+restores the original project, scripts, preferences and workspace layout.
+The demo is read-only, automatic script execution is paused, and demo data
+are never autosaved. Starting a tour during analysis reports that you must
+wait for the analysis to finish. The tour can be repeated without adding
+samples to the project.
+
 ## Experiment metadata
 
 The spectrum import wizard detects comma, semicolon, tab or pipe delimiters

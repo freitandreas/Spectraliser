@@ -1,6 +1,6 @@
 <script lang="ts">
   import { workspaceSceneCamera } from './lib/plot/sceneCamera'
-  import { tick } from 'svelte'
+  import { onDestroy, tick } from 'svelte'
   import ImportWizard from './lib/ImportWizard.svelte'
   import ExperimentMetadataImport from './lib/ExperimentMetadataImport.svelte'
   import StartupWizard from './lib/StartupWizard.svelte'
@@ -10,6 +10,10 @@
   import SettingsSidebar from './lib/workbench/SettingsSidebar.svelte'
   import ExportSidebar from './lib/workbench/ExportSidebar.svelte'
   import ConfirmDialogs from './lib/workbench/ConfirmDialogs.svelte'
+  import GuidedTour from './lib/workbench/GuidedTour.svelte'
+  import { tourActive } from './state/tourState'
+  import { DEFAULT_STARTUP_PREFERENCES } from './services/startupPreferences'
+  import type { TourView } from './services/tour/tourSteps'
   import { importFilesWithOptions } from './services/import/appImport'
   import { executeExport } from './services/export/executeExport'
   import { DEFAULT_EXPORT_SETTINGS, type ExportSettings } from './services/export/exportSettings'
@@ -27,12 +31,7 @@
   import { quantityNotation } from './state/displaySettings'
   import { removeAllDatasets, setAllDatasetsVisible, setTransformEnabled, setTransformParams } from './state/workbenchActions'
   import { applyGeneralChange, generalSettingsError, planGeneralChange, type GeneralSettingsContext } from './state/generalSettingsActions'
-  import {
-    beginResize,
-    resolveResize,
-    type ActiveResize,
-    type PanelSizes,
-  } from './lib/workbench/panelResize'
+  import { createPanelResizer, type PanelSizes } from './lib/workbench/panelResize'
   import {
     makeSampleTabId,
     parseSampleTabId,
@@ -41,6 +40,7 @@
   } from './lib/workbench/workbenchUtils'
 
   let importOpen = false
+  let guidedTour: GuidedTour
   let metadataImportOpen = false
   let metadataError = ''
   let importError = ''
@@ -65,6 +65,7 @@
 
   let layoutEl: HTMLDivElement | null = null
   let workspaceMain: WorkspaceMain | null = null
+  let settingsSidebar: SettingsSidebar | null = null
   let openSampleTabIds: string[] = []
   let expandedSampleId: string | null = null
   let explorerFocusDatasetId: string | null = null
@@ -78,8 +79,6 @@
   let bottomPanelOpen = true
   let rightPanelDatasetId: string | null = null
   let explorerHoverDatasetId: string | null = null
-
-  let activeResize: ActiveResize | null = null
 
   $: panelSizes = { left: leftPanelWidth, right: rightPanelWidth, bottom: bottomPanelHeight } as PanelSizes
 
@@ -391,37 +390,51 @@
     projectStore.setActiveTab(subView === 'peaks' ? 'peak_table' : 'sample_view')
   }
 
-  function startResize(kind: ResizeKind, event: MouseEvent): void {
-    event.preventDefault()
-    activeResize = beginResize(kind, event, panelSizes)
-
-    document.body.style.userSelect = 'none'
-    document.body.style.cursor = kind === 'bottom' ? 'row-resize' : 'col-resize'
-    window.addEventListener('mousemove', handleResizeMove)
-    window.addEventListener('mouseup', stopResize)
+  function prepareTour(): () => void {
+    const restoreSettings = settingsSidebar?.captureView()
+    const saved = {
+      leftPanelOpen, rightPanelOpen, bottomPanelOpen, bottomPanelHeight,
+      rightPanelDatasetId, explorerFocusDatasetId, expandedSampleId,
+      openSampleTabIds, activeWorkspaceTab, exportOpen, startupPreferences,
+    }
+    leftPanelOpen = rightPanelOpen = bottomPanelOpen = true
+    bottomPanelHeight = Math.min(300, Math.round(window.innerHeight * 0.4))
+    exportOpen = false
+    startupPreferences = structuredClone(DEFAULT_STARTUP_PREFERENCES)
+    return () => {
+      ;({
+        leftPanelOpen, rightPanelOpen, bottomPanelOpen, bottomPanelHeight,
+        rightPanelDatasetId, explorerFocusDatasetId, expandedSampleId,
+        openSampleTabIds, activeWorkspaceTab, exportOpen, startupPreferences,
+      } = saved)
+      restoreSettings?.()
+    }
   }
 
-  function handleResizeMove(event: MouseEvent): void {
-    if (!activeResize || !layoutEl) return
-
-    const next = resolveResize(activeResize, event, panelSizes, {
-      layoutWidth: layoutEl.clientWidth,
-      mainHeight: workspaceMain?.getMainHeight() ?? 0,
-    })
-
-    leftPanelWidth = next.left
-    rightPanelWidth = next.right
-    bottomPanelHeight = next.bottom
-    workspaceMain?.requestScriptMeasure()
+  function showTourView(view: TourView, datasetId: string): void {
+    startupPreferences = {
+      ...startupPreferences,
+      plotStyle: { ...startupPreferences.plotStyle, plotMode: view === 'heatmap' ? 'heatmap' : 'overlay' },
+    }
+    if (view === 'data' || view === 'peaks') openSampleSubTab(datasetId, view)
+    else activateScriptTab()
+    expandedSampleId = datasetId
+    rightPanelDatasetId = view === 'sample' ? datasetId : null
+    if (view === 'settings' || view === 'processing') settingsSidebar?.showGeneralSection(view === 'processing' ? 'processing' : 'axes')
   }
 
-  function stopResize(): void {
-    activeResize = null
-    document.body.style.userSelect = ''
-    document.body.style.cursor = ''
-    window.removeEventListener('mousemove', handleResizeMove)
-    window.removeEventListener('mouseup', stopResize)
-  }
+  const resizer = createPanelResizer(
+    () => panelSizes,
+    () => ({ layoutWidth: layoutEl?.clientWidth ?? 0, mainHeight: workspaceMain?.getMainHeight() ?? 0 }),
+    (next) => {
+      leftPanelWidth = next.left
+      rightPanelWidth = next.right
+      bottomPanelHeight = next.bottom
+      workspaceMain?.requestScriptMeasure()
+    },
+  )
+  const startResize = (kind: ResizeKind, event: MouseEvent): void => resizer.start(kind, event)
+  onDestroy(resizer.stop)
 
   function closeSampleTab(tabId: string): void {
     const nextTabs = openSampleTabIds.filter((id) => id !== tabId)
@@ -445,7 +458,7 @@
   }
 </script>
 
-<div class="workbench">
+<div class="workbench" inert={$tourActive}>
   <WorkbenchHeader
     {leftPanelOpen}
     {allDatasetsVisible}
@@ -470,6 +483,7 @@
       rightPanelDatasetId = null
     }}
     onExport={openExport}
+    onStartTour={() => { void guidedTour.start() }}
     onLinkMetadata={openMetadataLink}
     datasetCount={$projectStore.datasets.length}
   />
@@ -546,6 +560,7 @@
       />
     {:else}
       <SettingsSidebar
+        bind:this={settingsSidebar}
         open={rightPanelOpen}
         dataset={rightPanelDataset}
         datasets={$projectStore.datasets}
@@ -593,9 +608,13 @@
 
 <StartupWizard
   open={startupWizardOpen}
+  suspended={$tourActive}
   initialPreferences={startupPreferences}
   on:complete={completeStartupWizard}
+  on:tour={() => { void guidedTour.start() }}
 />
+
+<GuidedTour bind:this={guidedTour} onPrepare={prepareTour} onView={showTourView} />
 
 <ConfirmDialogs
   overwriteOpen={overwriteModalOpen}
