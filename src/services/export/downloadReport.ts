@@ -1,7 +1,7 @@
 import { finiteRange } from '../numeric'
 import { projectStore } from '../../state/projectStore'
 import { generateSelfContainedHtmlReport } from './htmlReport'
-import { createPythonProjectArchive } from './pythonProject'
+import { createPythonProjectArchive, type PythonProjectPlot } from './pythonProject'
 
 export type ExportFormat = 'html' | 'csv' | 'json' | 'python'
 
@@ -32,7 +32,7 @@ function buildCsvReport(state: ReturnType<typeof projectStore.snapshot>): string
   return [header, ...rows].join('\n')
 }
 
-export function downloadReport(format: ExportFormat = 'html'): void {
+export function downloadReport(format: ExportFormat = 'html', pythonPlot?: PythonProjectPlot): void {
   const state = projectStore.snapshot()
   const filenameBase = sanitizeFilename(state.projectName)
 
@@ -45,7 +45,8 @@ export function downloadReport(format: ExportFormat = 'html'): void {
     filename = `${filenameBase}.csv`
     mimeType = 'text/csv;charset=utf-8'
   } else if (format === 'python') {
-    blob = new Blob([createPythonProjectArchive(state)], { type: 'application/zip' })
+    if (!pythonPlot) throw new Error('Python export requires the current plot settings.')
+    blob = new Blob([createPythonProjectArchive(state, pythonPlot)], { type: 'application/zip' })
     filename = `${filenameBase}_python.zip`
     mimeType = 'application/zip'
   } else if (format === 'json') {

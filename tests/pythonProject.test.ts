@@ -3,6 +3,9 @@ import { crc32, createZip } from '../src/services/export/zipArchive'
 import { pythonProjectEntries, sampleCsv } from '../src/services/export/pythonProject'
 import type { AppState } from '../src/types/project'
 import { buildDataset } from './fixtures'
+import { DEFAULT_STARTUP_PREFERENCES, type PlotMode } from '../src/services/startupPreferences'
+
+const plot = { plotStyle: DEFAULT_STARTUP_PREFERENCES.plotStyle, camera: null }
 
 describe('zip archive', () => {
   it('computes standard CRC-32 and writes a valid stored archive', () => {
@@ -26,8 +29,8 @@ describe('python project export', () => {
       userScriptOverride: 'edited main',
       pythonFileOverrides: { 'main.py': 'edited main', 'processing.py': '# edited processing' },
     } as unknown as AppState
-    const entries = Object.fromEntries(pythonProjectEntries(state).map((entry) => [entry.path, entry.content]))
-    expect(entries['main.py']).toBe('edited main')
+    const entries = Object.fromEntries(pythonProjectEntries(state, plot).map((entry) => [entry.path, entry.content]))
+    expect(entries['main.py']).toBe("edited main\n\nif __name__ == '__main__':\n    from plot_project import show_project_plot\n    show_project_plot()\n")
     expect(entries['processing.py']).toBe('# edited processing')
     const samples = JSON.parse(entries['samples.json'] as string)
     expect(samples.map((sample: { dataFile: string }) => sample.dataFile)).toEqual([
@@ -36,5 +39,41 @@ describe('python project export', () => {
     ])
     expect(entries['data/Sample_01_Processed_.csv']).toBe(sampleCsv(dataset))
     expect(sampleCsv(dataset)).toBe('Wavelength / nm,Absorbance\n200,0.1\n201,0.2\n')
+    expect(entries['README.md']).toContain('python3 -m venv .venv')
+    expect(entries['README.md']).toContain('.\\.venv\\Scripts\\python.exe main.py')
+    expect(entries['requirements.txt']).toBe('numpy\npandas\nscipy\nplotly>=6,<7\n')
+    expect(entries['plot_project.py']).toContain('auto_open=True')
+    expect(entries['README.md']).toContain('current processed figure at export time')
+  })
+
+  it.each<PlotMode>(['overlay', 'heatmap', 'surface3d'])('preserves the %s figure, visibility and metadata axes', (plotMode) => {
+    const first = buildDataset({
+      units: { x: 'nm', y: '', xQuantity: 'Wavelength', yQuantity: 'Absorbance' },
+      experimentMetadata: { Time: '0 s' },
+      data: { abscissa: [200, 201], ordinateOriginal: [0, 0], ordinateModified: [1, 2], precision: 'float64' },
+    })
+    const second = buildDataset({ id: 'second', experimentMetadata: { Time: '2 s' } })
+    const hidden = buildDataset({ id: 'hidden', style: { ...first.style, visible: false } })
+    const state = {
+      datasets: [first, second, hidden], generatedScript: 'print("processed")',
+      userScriptOverride: null, pythonFileOverrides: {},
+    } as unknown as AppState
+    const camera = { eye: { x: 2, y: 1, z: 3 }, up: { x: 0, y: 0, z: 1 }, center: { x: 0, y: 0, z: 0 } }
+    const entries = Object.fromEntries(pythonProjectEntries(state, {
+      plotStyle: { ...plot.plotStyle, plotMode, seriesMode: 'markers', axisLabelFormat: 'in' },
+      camera,
+    }).map((entry) => [entry.path, entry.content]))
+    const figure = JSON.parse(entries['plot.json'] as string)
+    expect(figure.data[0].type).toBe(plotMode === 'overlay' ? 'scatter' : plotMode === 'heatmap' ? 'heatmap' : 'surface')
+    if (plotMode === 'overlay') {
+      expect(figure.data).toHaveLength(2)
+      expect(figure.data[0]).toMatchObject({ mode: 'markers', y: [1, 2], opacity: 1 })
+      expect(figure.layout.xaxis.title.text).toBe('Wavelength in nm')
+    } else {
+      expect(figure.data[0].y).toEqual([0, 2])
+      expect(figure.data[0].z).toHaveLength(2)
+    }
+    if (plotMode === 'surface3d') expect(figure.layout.scene.camera).toEqual(camera)
+    expect(JSON.parse(entries['samples.json'] as string)).toHaveLength(3)
   })
 })

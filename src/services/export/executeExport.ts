@@ -1,7 +1,7 @@
 import * as XLSX from 'xlsx'
 import type { AppState } from '../../types/project'
 import { createZip } from './zipArchive'
-import { createPythonProjectArchive } from './pythonProject'
+import { createPythonProjectArchive, type PythonProjectPlot } from './pythonProject'
 import { excelSheets, latexReport, latexTables, reportHtml } from './exportData'
 import { buildReportContent } from './reportContent'
 import { exportPixelSize, type ExportSettings } from './exportSettings'
@@ -43,6 +43,7 @@ export function executeExport(
   state: AppState,
   settings: ExportSettings,
   plotDataUrl: string | null,
+  pythonPlot: PythonProjectPlot,
   pdfWindow: Window | null = null,
 ): void {
   const base = filename(state.projectName)
@@ -50,7 +51,7 @@ export function executeExport(
   const report = () => buildReportContent(state, { peakColumns: settings.peakColumns })
 
   if (format === 'python') {
-    download(new Blob([createPythonProjectArchive(state)], { type: 'application/zip' }), `${base}_python.zip`)
+    download(new Blob([createPythonProjectArchive(state, pythonPlot)], { type: 'application/zip' }), `${base}_python.zip`)
     return
   }
   if (format === 'plot-image') {

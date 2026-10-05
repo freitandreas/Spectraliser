@@ -18,6 +18,11 @@ PYTHONPATH=src/python python3 -m unittest discover -s tests -p 'test_*.py'
 
 ## Experiment metadata
 
+The spectrum import wizard detects comma, semicolon, tab or pipe delimiters
+when it opens, using consistent column counts and numeric rows. Comma decimal
+separators are also recognised in non-comma-delimited files. Detection uses the
+first file; the chosen format applies to the whole batch and remains editable.
+
 Each sample's **Data** tab has a metadata box next to the data table. Add
 fields there as *Time* (number or `HH:MM:SS` with a unit), *Concentration*
 (molar or mass units) or a custom name with value and unit. Time,
@@ -82,6 +87,15 @@ JSON project snapshot. The PDF opens the browser's print dialog, where the
 destination can be set to “Save to PDF”. The LaTeX report ZIP contains
 `report.tex` and `plot.png` and compiles with XeLaTeX/LuaLaTeX (`fontspec`).
 
+The Python ZIP includes `README.md` and `requirements.txt`, with commands for
+creating and running a local virtual environment on Linux, macOS and Windows.
+It does not bundle a machine-specific environment or install packages automatically.
+Running `main.py` processes the source measurements and then opens `plot.html`
+in the default browser. This Plotly figure is a snapshot of the processed data
+at export time, preserving the current overlay/heatmap/3D mode, plot styling,
+visible series, metadata axes and 3D camera. Python/CSV edits do not update the
+saved figure; re-export from the app to refresh it.
+
 Imported samples are processed by the current pipeline, and peaks are then
 detected automatically on the processed signal. Detection settings can be
 refined per sample in the peak panel.
@@ -89,7 +103,7 @@ refined per sample in the peak panel.
 ## Editable Python files
 
 The Script tab has a scrollable file list on the left and one editor on the right.
-`main.py` embeds the sample metadata, `processing.py` applies the ordered
+`main.py` reads the sample metadata from `samples.json`, `processing.py` applies the ordered
 transforms, `sample_io.py` loads CSVs for standalone Python, `ir_assignments.py`
 detects and assigns IR peaks, and `ir_reference.py` holds the band catalog.
 Changes to each file are saved with the project. **Execute** loads all current
@@ -97,8 +111,9 @@ files into the worker, reloads edited modules and processes the selected samples
 **Revert To GUI State** clears edits to all Python files and rebuilds `main.py`
 from the current sample metadata. The other modules return to their defaults.
 
-In standalone Python, put the modules in the same directory and run `main.py`.
-The `sourcePath` values in its sample metadata must point to readable CSV files.
+For standalone Python, extract the Python export ZIP and follow its README.
+The sample metadata references the included CSVs via project-relative `dataFile`
+paths, so the project can be moved without changing the original `sourcePath`.
 
 ## IR peak assignments
 

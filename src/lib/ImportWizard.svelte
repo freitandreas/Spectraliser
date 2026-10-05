@@ -1,7 +1,7 @@
 <script lang="ts">
   import * as XLSX from 'xlsx'
   import { createEventDispatcher } from 'svelte'
-  import { defaultImportOptions } from '../services/import/importWizard'
+  import { defaultImportOptions, detectDelimitedFormat } from '../services/import/importWizard'
   import {
     parseDelimitedCollection,
     parseXlsxCollection,
@@ -38,6 +38,7 @@
   let wasOpen = false
   let metadataTouched = false
   let previewGeneration = 0
+  let detectFormatOnOpen = false
   $: if (open && !wasOpen) {
     options = {
       ...defaultImportOptions,
@@ -46,9 +47,15 @@
     }
     seriesLabelsByFile = {}
     metadataTouched = false
+    activeIndex = 0
+    detectFormatOnOpen = true
     wasOpen = true
   }
-  $: if (!open) wasOpen = false
+  $: if (!open) {
+    wasOpen = false
+    previewGeneration += 1
+    loadingPreview = false
+  }
   let metadataValid = true
   $: canSubmit = files.length > 0 && metadataValid && !loadingPreview
 
@@ -121,6 +128,19 @@
     previewError = ''
 
     try {
+      if (detectFormatOnOpen && !file.name.toLowerCase().endsWith('.xlsx')) {
+        const text = await file.text()
+        if (generation !== previewGeneration) return
+        if (detectFormatOnOpen) {
+          detectFormatOnOpen = false
+          const detected = detectDelimitedFormat(text)
+          if (detected.delimiter !== options.delimiter || detected.decimalSeparator !== options.decimalSeparator) {
+            options = { ...options, ...detected }
+            return
+          }
+        }
+      }
+      detectFormatOnOpen = false
       const rows = await readRows(file)
       if (generation !== previewGeneration) return
       tableRows = rows
@@ -201,10 +221,10 @@
       <div class="modal-grid">
         <label>
           Delimiter
-          <select bind:value={options.delimiter}>
+          <select bind:value={options.delimiter} on:change={() => { detectFormatOnOpen = false }}>
             <option value=",">Comma</option>
             <option value=";">Semicolon</option>
-            <option value="\t">Tab</option>
+            <option value={'\t'}>Tab</option>
             <option value="|">Pipe</option>
             <option value="custom">Custom</option>
           </select>
@@ -219,7 +239,7 @@
 
         <label>
           Decimal Separator
-          <select bind:value={options.decimalSeparator}>
+          <select bind:value={options.decimalSeparator} on:change={() => { detectFormatOnOpen = false }}>
             <option value=".">Dot</option>
             <option value=",">Comma</option>
           </select>

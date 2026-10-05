@@ -124,7 +124,7 @@
     <div class="export-description">
       <h2>{settings.format === 'python' ? 'Standalone Python project' : settings.format === 'csv' ? 'Project CSV summary' : settings.format === 'json' ? 'Project JSON snapshot' : 'Export preview'}</h2>
       <p>{settings.format === 'python'
-        ? 'The ZIP contains the current Python project files, samples.json, and one CSV data file per imported sample.'
+        ? 'The ZIP contains the current Python scripts, source CSVs, samples.json, a README with virtual-environment setup commands, requirements.txt, and a snapshot of the current figure. Running main.py processes the source data and opens the saved export-time Plotly figure in your browser.'
         : settings.format === 'csv'
           ? 'A row per sample with spectrum type, axis units, point count, and numeric ranges.'
           : 'A complete snapshot of the current project state, including samples, metadata, pipelines, and script files.'}</p>

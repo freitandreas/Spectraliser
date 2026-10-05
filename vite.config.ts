@@ -8,6 +8,9 @@ const repositoryBase = '/Spectraliser/'
 export default defineConfig(({ command }) => ({
   base: command === 'build' ? (process.env.BASE_PATH ?? repositoryBase) : '/',
   plugins: [svelte()],
+  resolve: {
+    conditions: process.env.VITEST ? ['browser'] : undefined,
+  },
   optimizeDeps: {
     exclude: ['pyodide'],
   },

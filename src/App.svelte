@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { workspaceSceneCamera } from './lib/plot/sceneCamera'
   import { tick } from 'svelte'
   import ImportWizard from './lib/ImportWizard.svelte'
   import ExperimentMetadataImport from './lib/ExperimentMetadataImport.svelte'
@@ -327,7 +328,10 @@
       const needsPlot = ['plot-image', 'latex-report'].includes(exportSettings.format)
         || (['pdf-report', 'html'].includes(exportSettings.format) && visibleDatasets.length > 0)
       const image = needsPlot ? await workspaceMain?.getExportPlotImage() ?? null : null
-      executeExport(projectStore.snapshot(), exportSettings, image, pdfWindow)
+      executeExport(projectStore.snapshot(), exportSettings, image, {
+        plotStyle: startupPreferences.plotStyle,
+        camera: $workspaceSceneCamera,
+      }, pdfWindow)
       closeExport()
     } catch (error) {
       pdfWindow?.close()
