@@ -2,7 +2,7 @@ import { defineConfig } from 'vitest/config'
 import { svelte } from '@sveltejs/vite-plugin-svelte'
 
 // GitHub project pages serve from /<repo>/, so built asset URLs need that prefix.
-const repositoryBase = '/Spectra_Visualiser/'
+const repositoryBase = '/Spectraliser/'
 
 // https://vite.dev/config/
 export default defineConfig(({ command }) => ({
