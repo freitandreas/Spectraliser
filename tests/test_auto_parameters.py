@@ -30,6 +30,14 @@ class NoiseEstimateTest(unittest.TestCase):
         self.assertEqual(suggest_peak_settings(correlated)['noiseDiagnostics'], diagnostics)
         self.assertEqual(suggest_savgol(correlated)['noiseDiagnostics'], diagnostics)
 
+    def test_measured_uv_vis_series_warns(self):
+        """JS 603 (SI Section 8.3): lag-1 noise ~6e-5, far below the real scatter."""
+        from pathlib import Path
+        data = Path(__file__).resolve().parents[1] / 'public/samples/Data_TR_UV_Vis'
+        for name in ('JS_603_0min_abs.csv', 'JS_603_120min_abs.csv', 'JS_603_1187min_abs.csv'):
+            absorbance = np.loadtxt(data / name, delimiter=';')[:, 1]
+            self.assertTrue(noise_diagnostics(absorbance)['correlated'], name)
+
     def test_white_noise_and_noise_free_bands_do_not_warn(self):
         self.assertFalse(noise_diagnostics(np.random.default_rng(42).normal(size=20000))['correlated'])
         _, clean, _ = _ir()

@@ -1,0 +1,36 @@
+diff --git a/src/python/peak_detection.py b/src/python/peak_detection.py
+index 33cf154..0610d89 100644
+--- a/src/python/peak_detection.py
++++ b/src/python/peak_detection.py
+@@ -78,9 +78,10 @@ def noise_diagnostics(values):
+     finite = y[np.isfinite(y)]
+     floor = AUTO_SPAN_FLOOR * float(np.ptp(finite)) if finite.size else 0.0
+     first, second, fourth = (estimates[f'lag{lag}'] for lag in (1, 2, 4))
++    # Short correlation lengths saturate between lags 2 and 4, so lag 4 is compared
++    # with lag 1 only (white noise gives ratios close to 1 at every lag).
+     correlated = bool(finite.size >= 64 and first > floor
+-                      and second > 1.3 * first and fourth > 1.25 * second
+-                      and fourth > 2 * first)
++                      and second > 1.3 * first and fourth > 1.6 * first)
+     warning = ('Noise estimates grow with lag; correlated noise or unresolved signal curvature '
+                'may make the automatic peak threshold too low.') if correlated else None
+     return {'lagEstimates': estimates, 'correlated': correlated, 'warning': warning}
+diff --git a/tests/test_auto_parameters.py b/tests/test_auto_parameters.py
+index 52ac161..bb09d14 100644
+--- a/tests/test_auto_parameters.py
++++ b/tests/test_auto_parameters.py
+@@ -30,6 +30,14 @@ class NoiseEstimateTest(unittest.TestCase):
+         self.assertEqual(suggest_peak_settings(correlated)['noiseDiagnostics'], diagnostics)
+         self.assertEqual(suggest_savgol(correlated)['noiseDiagnostics'], diagnostics)
+ 
++    def test_measured_uv_vis_series_warns(self):
++        """JS 603 (SI Section 8.3): lag-1 noise ~6e-5, far below the real scatter."""
++        from pathlib import Path
++        data = Path(__file__).resolve().parents[1] / 'public/samples/Data_TR_UV_Vis'
++        for name in ('JS_603_0min_abs.csv', 'JS_603_120min_abs.csv', 'JS_603_1187min_abs.csv'):
++            absorbance = np.loadtxt(data / name, delimiter=';')[:, 1]
++            self.assertTrue(noise_diagnostics(absorbance)['correlated'], name)
++
+     def test_white_noise_and_noise_free_bands_do_not_warn(self):
+         self.assertFalse(noise_diagnostics(np.random.default_rng(42).normal(size=20000))['correlated'])
+         _, clean, _ = _ir()

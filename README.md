@@ -47,8 +47,8 @@ window, units and point count, so reference-band changes remain inspectable.
 Noise diagnostics compare MAD-based second-difference estimates at sample
 lags 1, 2 and 4 without changing the existing estimator or automatic thresholds.
 For at least 64 finite points, a warning appears if the lag-1 estimate exceeds
-1e-6 of the signal span, lag 2 exceeds 1.3 times lag 1, and lag 4 exceeds both
-1.25 times lag 2 and twice lag 1. The warning is a heuristic: correlated noise
+1e-6 of the signal span, lag 2 exceeds 1.3 times lag 1, and lag 4 exceeds
+1.6 times lag 1. The warning is a heuristic: correlated noise
 or unresolved signal curvature may make the automatic peak threshold too low.
 It appears in peak settings and automatic smoothing advice. Seeded correlated
 synthetic noise triggers it; white noise and noise-free IR bands do not.

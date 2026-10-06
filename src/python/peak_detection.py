@@ -78,9 +78,10 @@ def noise_diagnostics(values):
     finite = y[np.isfinite(y)]
     floor = AUTO_SPAN_FLOOR * float(np.ptp(finite)) if finite.size else 0.0
     first, second, fourth = (estimates[f'lag{lag}'] for lag in (1, 2, 4))
+    # Short correlation lengths saturate between lags 2 and 4, so lag 4 is compared
+    # with lag 1 only (white noise gives ratios close to 1 at every lag).
     correlated = bool(finite.size >= 64 and first > floor
-                      and second > 1.3 * first and fourth > 1.25 * second
-                      and fourth > 2 * first)
+                      and second > 1.3 * first and fourth > 1.6 * first)
     warning = ('Noise estimates grow with lag; correlated noise or unresolved signal curvature '
                'may make the automatic peak threshold too low.') if correlated else None
     return {'lagEstimates': estimates, 'correlated': correlated, 'warning': warning}
