@@ -60,6 +60,13 @@ retained even with the header checkbox enabled. This fixes the previous
 loss of the 182.5 nm point and its use as a series label. Previously saved
 imports cannot recover that omitted row automatically; reimport their source.
 
+## Report analyses
+
+The scripts behind Figures 7 and 8 of the internship report are in `analysis/`. They read
+Spectraliser Python project exports of the bundled AE-509 and JS 603 samples and use
+`src/python/processing.py` from the same checkout. See `analysis/README.md` for the export
+steps and commands.
+
 ## Guided tour
 
 Choose **Take a tour** during setup or **About/Help** in the toolbar to open
