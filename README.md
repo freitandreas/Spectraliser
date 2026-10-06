@@ -13,8 +13,52 @@ Use **Check**, **Test** and **Build** with `npm run check`, `npm test` and `npm 
 Run the scientific rule tests with:
 
 ```sh
+python3 -m pip install numpy pandas scipy pybaselines
 PYTHONPATH=src/python python3 -m unittest discover -s tests -p 'test_*.py'
 ```
+
+`pybaselines` is a test-only reference dependency, not a browser runtime dependency.
+
+## Processing validation
+
+The baseline step offers **Polynomial** and **AsLS** (SciPy sparse asymmetric
+least squares). AsLS uses a second-difference penalty on the sample-index grid
+and a fixed iteration count; lambda therefore depends on sampling density.
+Defaults are lambda = 100000, p = 0.01 and 10 iterations. Use p near 1 for
+downward bands rather than upward bands. Invalid parameters and non-finite
+data are refused. Original measurements are never replaced by these transforms.
+
+The first AE-509-2 series (1176 points) was compared with `pybaselines` 1.2.1
+using `Baseline().asls(lam=1e5, p=0.01, diff_order=2, max_iter=9, tol=-1)`.
+The negative tolerance disables early stopping, and `max_iter=9` gives ten
+linear solves, matching our fixed ten iterations. The maximum absolute
+baseline difference was 1.32e-13. The regression test compares every point
+with `rtol=1e-7, atol=1e-9`.
+
+**Reference window** normalisation divides by the arithmetic mean immediately
+before the normalisation step, using the reference center and half-width in
+the sample's current abscissa units (default 1182 +/- 4, suitable for cm^-1).
+The output is a dimensionless ratio even when the input is in percent. An empty
+window, non-finite data, or a mean at or below the larger of the absolute
+minimum (default 1e-8) and 1e-6 times the maximum absolute signal is refused.
+The sample and all-samples processing views show each last-run reference mean,
+window, units and point count, so reference-band changes remain inspectable.
+
+Noise diagnostics compare MAD-based second-difference estimates at sample
+lags 1, 2 and 4 without changing the existing estimator or automatic thresholds.
+For at least 64 finite points, a warning appears if the lag-1 estimate exceeds
+1e-6 of the signal span, lag 2 exceeds 1.3 times lag 1, and lag 4 exceeds both
+1.25 times lag 2 and twice lag 1. The warning is a heuristic: correlated noise
+or unresolved signal curvature may make the automatic peak threshold too low.
+It appears in peak settings and automatic smoothing advice. Seeded correlated
+synthetic noise triggers it; white noise and noise-free IR bands do not.
+
+The JS_603_0min import regression compares all 1675 CSV rows against the
+instrument's original binary float32 data: wavelengths match exactly and
+absorbances differ by at most 5.1e-11 (CSV rounding). A numeric first row is
+retained even with the header checkbox enabled. This fixes the previous
+loss of the 182.5 nm point and its use as a series label. Previously saved
+imports cannot recover that omitted row automatically; reimport their source.
 
 ## Guided tour
 

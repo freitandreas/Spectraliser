@@ -4,7 +4,7 @@ import unittest
 import numpy as np
 from scipy.signal import savgol_filter
 
-from peak_detection import estimate_noise, find_spectral_peaks, resolve_settings, suggest_peak_settings
+from peak_detection import estimate_noise, find_spectral_peaks, noise_diagnostics, resolve_settings, suggest_peak_settings
 from smoothing_tuning import suggest_savgol
 
 BANDS = ((1740, 9, 40), (1240, 13, 32), (1090, 12, 26), (2950, 14, 18))
@@ -19,6 +19,23 @@ def _ir(noise=0.0, seed=0):
 
 
 class NoiseEstimateTest(unittest.TestCase):
+    def test_correlated_noise_warns_without_changing_estimator(self):
+        rng = np.random.default_rng(42)
+        white = rng.normal(size=20000)
+        correlated = np.convolve(white, np.ones(8) / 8, mode='valid')
+        diagnostics = noise_diagnostics(correlated)
+        self.assertTrue(diagnostics['correlated'])
+        self.assertIn('threshold too low', diagnostics['warning'])
+        self.assertAlmostEqual(diagnostics['lagEstimates']['lag1'], estimate_noise(correlated))
+        self.assertEqual(suggest_peak_settings(correlated)['noiseDiagnostics'], diagnostics)
+        self.assertEqual(suggest_savgol(correlated)['noiseDiagnostics'], diagnostics)
+
+    def test_white_noise_and_noise_free_bands_do_not_warn(self):
+        self.assertFalse(noise_diagnostics(np.random.default_rng(42).normal(size=20000))['correlated'])
+        _, clean, _ = _ir()
+        self.assertFalse(noise_diagnostics(clean)['correlated'])
+        self.assertFalse(noise_diagnostics([1, 2, 3])['correlated'])
+
     def test_recovers_white_noise_under_bands(self):
         _, _, noisy = _ir(noise=0.8, seed=3)
         self.assertAlmostEqual(estimate_noise(noisy), 0.8, delta=0.08)

@@ -2,6 +2,7 @@ import type { SmoothingSuggestion, WorkerRequest, WorkerResponse } from './messa
 import { logInfo, logWarn, logError, ensurePyodideReady } from './runtimeCore'
 import peakDetectionSource from '../python/peak_detection.py?raw'
 import smoothingTuningSource from '../python/smoothing_tuning.py?raw'
+import type { NoiseDiagnostics } from '../types/project'
 
 // The tuner imports estimate_noise from peak_detection; inlined, that name is already defined.
 const TOOL_SOURCE = `${peakDetectionSource}\n${smoothingTuningSource.replace(/^from peak_detection import .*$/m, '')}`
@@ -34,6 +35,7 @@ export async function detectPeaks(
     y: number[]
     prominence: number[]
     settings: { prominence: number; minDistance: number }
+    noiseDiagnostics: NoiseDiagnostics
   }>(
     request,
     {
@@ -58,6 +60,7 @@ tool_result = {
     'y': y[indices].tolist(),
     'prominence': prominences.tolist(),
     'settings': {'prominence': float(resolved['prominence']), 'minDistance': int(resolved['minDistance'])},
+    'noiseDiagnostics': noise_diagnostics(y),
 }
 `,
   )
@@ -73,6 +76,7 @@ tool_result = {
       prominence: result.prominence[position] ?? 0,
     })),
     settings: result.settings,
+    noiseDiagnostics: result.noiseDiagnostics,
   }
 }
 

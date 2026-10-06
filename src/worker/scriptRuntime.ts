@@ -1,4 +1,4 @@
-import type { BatchRequest, BatchSampleResult, WorkerResponse } from './messages'
+import { processingDiagnosticsSchema, type BatchRequest, type BatchSampleResult, type WorkerResponse } from './messages'
 import { logInfo, logWarn, logError, state, ensurePyodideReady, toFloatArray, maybeUpgradePrecision } from './runtimeCore'
 import selectiveRunSource from '../python/selective_run.py?raw'
 import { RUNNER_DIRECTORY } from '../services/script/runScript'
@@ -75,6 +75,7 @@ export async function executeBatch(request: BatchRequest): Promise<WorkerRespons
         ordinateModified: Array.from(item.ordinate_modified as ArrayLike<number>),
         peaks: (item.peaks ?? []) as Extract<BatchSampleResult, { peaks: unknown }>['peaks'],
         precision: precisions.get(id) ?? (request.preferFloat32 ? 'float32' : 'float64'),
+        processingDiagnostics: processingDiagnosticsSchema.parse(item.processingDiagnostics ?? {}),
       }
     })
     return { type: 'batch_result', requestId: request.requestId, results }

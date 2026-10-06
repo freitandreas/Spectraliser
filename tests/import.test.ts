@@ -1,9 +1,32 @@
 import { createDatasetFromParsed, resolveProjectSpectrumType } from '../src/state/projectContext'
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
 import { parseDelimited, parseDelimitedCollection } from '../src/services/import/parsers'
 import { canConvertAbscissa, convertAbscissa } from '../src/services/import/unitConversion'
 
 describe('parseDelimited', () => {
+  it('preserves every JS 603 point even when the header checkbox is enabled', () => {
+    const source = readFileSync('public/samples/Data_TR_UV_Vis/JS_603_0min_abs.csv', 'utf8')
+    const original = source.trim().split(/\r?\n/).map((row) => row.split(';').map(Number))
+    const series = parseDelimitedCollection(source, {
+      delimiter: ';', decimalSeparator: '.', startRow: 0,
+      hasHeader: true, xColumn: 0, yColumn: 1,
+    }).series[0]!
+    expect(series.abscissa).toEqual(original.map((row) => row[0]))
+    expect(series.ordinate).toEqual(original.map((row) => row[1]))
+    expect(series.abscissa[0]).toBe(182.5)
+    expect(series.label).toBe('Series 2')
+    const instrument = readFileSync('public/samples/Data_TR_UV_Vis/JS_603_0min.dat')
+    const xOffset = instrument.indexOf(Buffer.from('XDATA=\r\n')) + 8
+    const yOffset = instrument.indexOf(Buffer.from('YDATA=\r\n')) + 8
+    expect(instrument.toString('latin1', 0, xOffset)).toContain('NPOINTS=1675')
+    expect(series.abscissa).toHaveLength(1675)
+    for (let index = 0; index < series.abscissa.length; index += 1) {
+      expect(series.abscissa[index]).toBe(instrument.readFloatLE(xOffset + 4 * index))
+      expect(Math.abs(series.ordinate[index]! - instrument.readFloatLE(yOffset + 4 * index))).toBeLessThan(5.1e-11)
+    }
+  })
+
   it('converts wavelength and wavenumber values deterministically', () => {
     expect(convertAbscissa([200, 2], 'nm', 'µm')).toEqual([0.2, 0.002])
     expect(convertAbscissa([1000, 2000], 'cm^-1', 'nm')).toEqual([10000, 5000])

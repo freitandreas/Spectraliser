@@ -66,6 +66,26 @@ def _significant(value):
     return float(f'{value:.3g}') if value > 0 else 0.0
 
 
+def noise_diagnostics(values):
+    """Lag-growth heuristic only; it does not alter the white-noise estimator."""
+    y = np.asarray(values, dtype=float)
+    estimates = {}
+    for lag in (1, 2, 4):
+        valid = np.isfinite(y[:-2 * lag]) & np.isfinite(y[lag:-lag]) & np.isfinite(y[2 * lag:])
+        differences = (y[:-2 * lag] - 2 * y[lag:-lag] + y[2 * lag:])[valid]
+        mad = np.median(np.abs(differences - np.median(differences))) if differences.size >= 5 else 0.0
+        estimates[f'lag{lag}'] = float(1.4826 * mad / np.sqrt(6.0))
+    finite = y[np.isfinite(y)]
+    floor = AUTO_SPAN_FLOOR * float(np.ptp(finite)) if finite.size else 0.0
+    first, second, fourth = (estimates[f'lag{lag}'] for lag in (1, 2, 4))
+    correlated = bool(finite.size >= 64 and first > floor
+                      and second > 1.3 * first and fourth > 1.25 * second
+                      and fourth > 2 * first)
+    warning = ('Noise estimates grow with lag; correlated noise or unresolved signal curvature '
+               'may make the automatic peak threshold too low.') if correlated else None
+    return {'lagEstimates': estimates, 'correlated': correlated, 'warning': warning}
+
+
 def _noise_range(noise, size):
     """Range 2 σ √(2 ln n) that n points of pure white noise are not expected to exceed."""
     return 2.0 * noise * np.sqrt(2.0 * np.log(max(size, 2)))
@@ -97,7 +117,8 @@ def suggest_peak_settings(ordinate, mode=DEFAULT_MODE):
     finite = np.asarray(ordinate, dtype=float)
     finite = finite[np.isfinite(finite)]
     if finite.size < 3:
-        return {'prominence': 0.0, 'minDistance': 1, 'noise': 0.0, 'fwhmPoints': None}
+        return {'prominence': 0.0, 'minDistance': 1, 'noise': 0.0, 'fwhmPoints': None,
+            'noiseDiagnostics': noise_diagnostics(ordinate)}
     noise = estimate_noise(finite)
     floor = max(2.0 * _quantisation_step(finite), AUTO_SPAN_FLOOR * float(np.ptp(finite)))
     prominence = _significant(max(_noise_range(noise, finite.size), floor))
@@ -113,7 +134,8 @@ def suggest_peak_settings(ordinate, mode=DEFAULT_MODE):
             strong = widths[prominences >= np.median(prominences)]
             fwhm = float(np.median(strong))
     min_distance = max(1, int(round(0.5 * fwhm))) if fwhm else 1
-    return {'prominence': prominence, 'minDistance': min_distance, 'noise': noise, 'fwhmPoints': fwhm}
+    return {'prominence': prominence, 'minDistance': min_distance, 'noise': noise, 'fwhmPoints': fwhm,
+            'noiseDiagnostics': noise_diagnostics(ordinate)}
 
 
 def _locally_significant(signal, indices, prominences):

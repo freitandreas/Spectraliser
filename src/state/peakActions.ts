@@ -45,6 +45,7 @@ function withDetectedPeaks(item: SpectrumDataset, options: PeakDetectionOptions,
       ? { ...options, prominence: sign * response.settings.prominence, minDistance: response.settings.minDistance }
       : item.peakDetection,
     removedPeakCount: 0,
+    processingDiagnostics: { ...item.processingDiagnostics, noise: response.noiseDiagnostics },
     peaks: [
       ...item.peaks.filter((peak) => peak.source === 'manual'),
       ...response.peaks.map(autoPeak),

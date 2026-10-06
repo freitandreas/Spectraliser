@@ -6,7 +6,26 @@ export type TransformScope = 'no' | 'individual' | 'global'
 
 export type SyncMode = 'gui_synchronized' | 'desync_active'
 
-export type NormalizationMode = 'minmax' | 'vector' | 'area' | 'peak'
+export type NormalizationMode = 'minmax' | 'vector' | 'area' | 'peak' | 'reference'
+
+export interface NoiseDiagnostics {
+  lagEstimates: { lag1: number; lag2: number; lag4: number }
+  correlated: boolean
+  warning: string | null
+}
+
+export interface ProcessingDiagnostics {
+  referenceNormalization?: {
+    value: number
+    center: number
+    halfWidth: number
+    pointCount: number
+    minimumAbs: number
+    xUnit: string
+    yUnit: string
+  }
+  noise?: NoiseDiagnostics
+}
 
 export interface SpectrumUnits {
   x: string
@@ -109,6 +128,7 @@ export interface SpectrumDataset {
   peakDetection?: PeakDetectionOptions
   /** Detected peaks the user deleted since the last detection run; reset by a new detection. */
   removedPeakCount?: number
+  processingDiagnostics?: ProcessingDiagnostics
 }
 
 export interface ViewState {

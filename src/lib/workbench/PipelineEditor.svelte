@@ -12,6 +12,7 @@
   type Params = Record<string, number | string | boolean>
 
   export let pipeline: TransformDefinition[]
+  export let xUnit = ''
   export let onEnabled: (transformId: string, enabled: boolean) => void
   export let onParams: (transformId: string, params: Params) => void
   /** Optional per-step marker, e.g. "differs from general" or "3 samples differ". */
@@ -36,7 +37,7 @@
 
   const STEP_META: Record<string, { title: string; summary: string }> = {
     crop: { title: 'Crop', summary: 'Restrict the spectrum to an abscissa window.' },
-    baseline: { title: 'Baseline', summary: 'Subtract a fitted polynomial baseline.' },
+    baseline: { title: 'Baseline', summary: 'Subtract a polynomial or asymmetric least-squares baseline.' },
     smoothing: { title: 'Smoothing', summary: 'Savitzky-Golay filter on the ordinate.' },
     inversion: { title: 'Inversion', summary: 'Flip the sign of the ordinate.' },
     normalization: { title: 'Normalisation', summary: 'Rescale the ordinate to a common range.' },
@@ -99,16 +100,36 @@
           {#if transform.type === 'baseline'}
             <div class="pipeline-params single">
               <label>
-                <span>Polynomial order</span>
-                <input
-                  type="number"
-                  min="1"
-                  max="6"
-                  value={Number(transform.params.order ?? 3)}
-                  on:change={(event) =>
-                    onParams(transform.id, { order: Number((event.target as HTMLInputElement).value) })}
-                />
+                <span>Method</span>
+                <select value={String(transform.params.method ?? 'polynomial')}
+                  on:change={(event) => onParams(transform.id, { method: (event.target as HTMLSelectElement).value })}>
+                  <option value="polynomial">Polynomial</option>
+                  <option value="asls">AsLS</option>
+                </select>
               </label>
+              {#if transform.params.method === 'asls'}
+                <label>
+                  <span>Lambda</span>
+                  <input type="number" min="0.000001" step="10000" value={Number(transform.params.lam ?? 1e5)}
+                    on:change={(event) => onParams(transform.id, { lam: Number((event.target as HTMLInputElement).value) })} />
+                </label>
+                <label for={`asls-p-${transform.id}`}>
+                  <span class="label-line">Asymmetry p <HelpTip label="AsLS asymmetry" text="Use p near 0 for upward bands, near 1 for downward bands. Lambda penalises curvature on the sample-index grid, so it depends on sampling density." /></span>
+                  <input id={`asls-p-${transform.id}`} type="number" min="0.000001" max="0.999999" step="0.01" value={Number(transform.params.p ?? .01)}
+                    on:change={(event) => onParams(transform.id, { p: Number((event.target as HTMLInputElement).value) })} />
+                </label>
+                <label>
+                  <span>Iterations</span>
+                  <input type="number" min="1" max="1000" step="1" value={Number(transform.params.n_iter ?? 10)}
+                    on:change={(event) => onParams(transform.id, { n_iter: Number((event.target as HTMLInputElement).value) })} />
+                </label>
+              {:else}
+                <label>
+                  <span>Polynomial order</span>
+                  <input type="number" min="1" max="6" value={Number(transform.params.order ?? 3)}
+                    on:change={(event) => onParams(transform.id, { order: Number((event.target as HTMLInputElement).value) })} />
+                </label>
+              {/if}
             </div>
           {/if}
 
@@ -163,6 +184,23 @@
                   {/each}
                 </select>
               </label>
+              {#if transform.params.mode === 'reference'}
+                <label>
+                  <span>Reference center{xUnit ? ` (${xUnit})` : ''}</span>
+                  <input type="number" step="any" value={Number(transform.params.reference_x ?? 1182)}
+                    on:change={(event) => onParams(transform.id, { reference_x: Number((event.target as HTMLInputElement).value) })} />
+                </label>
+                <label>
+                  <span>Window half-width{xUnit ? ` (${xUnit})` : ''}</span>
+                  <input type="number" min="0.000001" step="any" value={Number(transform.params.reference_half_width ?? 4)}
+                    on:change={(event) => onParams(transform.id, { reference_half_width: Number((event.target as HTMLInputElement).value) })} />
+                </label>
+                <label for={`reference-min-${transform.id}`}>
+                  <span class="label-line">Minimum |mean| <HelpTip label="Reference safety" text="Normalisation is refused at or below the larger of this absolute limit and one millionth of the maximum absolute signal immediately before normalisation." /></span>
+                  <input id={`reference-min-${transform.id}`} type="number" min="0" step="any" value={Number(transform.params.reference_min_abs ?? 1e-8)}
+                    on:change={(event) => onParams(transform.id, { reference_min_abs: Number((event.target as HTMLInputElement).value) })} />
+                </label>
+              {/if}
             </div>
           {/if}
 

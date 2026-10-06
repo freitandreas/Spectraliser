@@ -11,6 +11,7 @@
     formatUnit,
   } from '../../services/spectrumPresets'
   import PipelineEditor from './PipelineEditor.svelte'
+  import ReferenceValues from './ReferenceValues.svelte'
   import { projectStore } from '../../state/projectStore'
   import SettingBadge from './SettingBadge.svelte'
   import type { BadgeInfo } from './settingBadge'
@@ -301,6 +302,7 @@
     <div class="settings-card">
       <PipelineEditor
         pipeline={dataset.pipeline}
+        xUnit={dataset.units.x}
         onEnabled={(transformId, enabled) => onTransformEnabled(dataset.id, transformId, enabled)}
         onParams={(transformId, params) => onTransformParam(dataset.id, transformId, params)}
         badgeFor={(type) => badgeFor(pipelineKey(type))}
@@ -311,6 +313,7 @@
           return advice.message
         }}
       />
+      <ReferenceValues datasets={[dataset]} />
     </div>
   {/if}
 </section>

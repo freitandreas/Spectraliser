@@ -31,6 +31,16 @@ INVERT = {'id': 'i', 'type': 'inversion', 'scope': 'individual', 'enabled': True
 
 
 class SelectiveRunTests(unittest.TestCase):
+    def test_reference_diagnostics_cross_runner_without_replacing_measurements(self):
+        step = {'id': 'ref', 'type': 'normalization', 'enabled': True,
+                'params': {'mode': 'reference', 'reference_x': 4, 'reference_half_width': 1}}
+        source = sample('a', [step])
+        result = run_samples(['a'], [source], process_spectrum, assign_ir_peaks)[0]
+        self.assertEqual(result['processingDiagnostics']['referenceNormalization']['value'], 4)
+        self.assertEqual(result['processingDiagnostics']['referenceNormalization']['xUnit'], 'nm')
+        self.assertNotIn('abscissa', result)
+        self.assertNotIn('ordinate_original', result)
+
     def test_runs_only_requested_samples(self):
         samples = [sample('a', [INVERT]), sample('b', [INVERT])]
         results = run_samples(['b'], samples, process_spectrum, assign_ir_peaks)

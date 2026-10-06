@@ -15,6 +15,7 @@ export function applyScriptResult(current: SpectrumDataset, result: SampleRunRes
   }
   return {
     ...current,
+    processingDiagnostics: result.processingDiagnostics,
     data: {
       ...current.data,
       ordinateModified: result.ordinateModified,

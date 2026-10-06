@@ -35,6 +35,8 @@ export function smoothingInput(dataset: SpectrumDataset): number[] {
  * most frequent order among the samples that can be smoothed safely.
  */
 export function combineSmoothingSuggestions(suggestions: SmoothingSuggestion[]): SmoothingAdvice {
+  const warning = suggestions.find((item) => item.noiseDiagnostics?.warning)?.noiseDiagnostics?.warning
+  const warningSuffix = warning ? ` ${warning}` : ''
   const usable = suggestions.filter((item) => item.status === 'ok')
   if (usable.length === 0) {
     const counts = new Map<Exclude<SmoothingSuggestion['status'], 'ok'>, number>()
@@ -42,7 +44,7 @@ export function combineSmoothingSuggestions(suggestions: SmoothingSuggestion[]):
       if (item.status !== 'ok') counts.set(item.status, (counts.get(item.status) ?? 0) + 1)
     }
     const status = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'too_short'
-    return { params: null, disable: status !== 'too_short', message: STATUS_MESSAGES[status] }
+    return { params: null, disable: status !== 'too_short', message: STATUS_MESSAGES[status] + warningSuffix }
   }
 
   const orders = usable.map((item) => item.polyorder)
@@ -60,5 +62,5 @@ export function combineSmoothingSuggestions(suggestions: SmoothingSuggestion[]):
     fwhm.length ? `narrowest bands ≈ ${median(fwhm).toFixed(1)} points FWHM` : 'no resolved band',
   ]
   if (suggestions.length > 1) parts.push(`${usable.length} of ${suggestions.length} samples`)
-  return { params: { window_length: window, polyorder }, disable: false, message: `${parts.join(' · ')}.` }
+  return { params: { window_length: window, polyorder }, disable: false, message: `${parts.join(' · ')}.${warningSuffix}` }
 }

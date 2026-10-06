@@ -9,7 +9,7 @@ the residual must stay consistent with pure noise, otherwise the window shrinks.
 import numpy as np
 from scipy.signal import find_peaks, peak_widths, savgol_coeffs, savgol_filter
 
-from peak_detection import estimate_noise
+from peak_detection import estimate_noise, noise_diagnostics
 
 # A band must stand this many noise σ above its surroundings to set the width limit.
 MIN_SIGNIFICANCE = 8.0
@@ -56,7 +56,8 @@ def suggest_savgol(ordinate):
     """
     y = np.asarray(ordinate, dtype=float)
     y = y[np.isfinite(y)]
-    result = {'windowLength': 5, 'polyorder': 2, 'noise': 0.0, 'snr': None, 'fwhmPoints': None}
+    result = {'windowLength': 5, 'polyorder': 2, 'noise': 0.0, 'snr': None, 'fwhmPoints': None,
+              'noiseDiagnostics': noise_diagnostics(ordinate)}
     if y.size < 7:
         return {**result, 'status': 'too_short'}
 

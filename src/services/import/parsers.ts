@@ -135,8 +135,12 @@ function buildSeriesFromRows(
   options: ImportOptions,
 ): ParsedSpectrumCollection {
   const start = Math.max(0, options.startRow)
-  const headerRow = options.hasHeader ? rows[start] ?? [] : []
-  const dataStart = options.hasHeader ? start + 1 : start
+  const firstRow = rows[start] ?? []
+  const numericFirstRow = parseNumber(String(firstRow[options.xColumn] ?? ''), options.decimalSeparator) !== null
+    && parseNumber(String(firstRow[options.yColumn] ?? ''), options.decimalSeparator) !== null
+  const hasHeader = options.hasHeader && !numericFirstRow
+  const headerRow = hasHeader ? firstRow : []
+  const dataStart = hasHeader ? start + 1 : start
   const dataRows = rows.slice(dataStart)
 
   let maxColumns = 0

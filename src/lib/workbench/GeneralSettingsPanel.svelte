@@ -18,6 +18,7 @@
   import PlotModeSettings from '../PlotModeSettings.svelte'
   import ComputePrecisionSettings from '../ComputePrecisionSettings.svelte'
   import PipelineEditor from './PipelineEditor.svelte'
+  import ReferenceValues from './ReferenceValues.svelte'
   import { projectStore } from '../../state/projectStore'
   import SettingBadge from './SettingBadge.svelte'
   import HelpTip from '../HelpTip.svelte'
@@ -221,6 +222,7 @@
   {#if activeTab === 'processing'}
     <div class="settings-card">
       <PipelineEditor
+        xUnit={axes.xUnit}
         pipeline={snapshot.pipeline}
         onEnabled={(transformId, enabled) => {
           const step = snapshot.pipeline.find((item) => item.id === transformId)
@@ -239,6 +241,7 @@
         }}
       />
     </div>
+    <ReferenceValues datasets={$projectStore.datasets} />
     <div class="settings-card">
       <ComputePrecisionSettings precision={computePrecision} onChange={onUpdateComputePrecision} />
     </div>

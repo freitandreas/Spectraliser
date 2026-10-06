@@ -8,6 +8,19 @@ const peak = {
 }
 
 describe('applyScriptResult', () => {
+  it('retains reference and noise diagnostics without overwriting original data', () => {
+    const dataset = buildDataset()
+    const processingDiagnostics = {
+      referenceNormalization: { value: .3, center: 1182, halfWidth: 4, pointCount: 5,
+        minimumAbs: 1e-8, xUnit: 'cm^-1', yUnit: '' },
+      noise: { lagEstimates: { lag1: .01, lag2: .02, lag4: .04 }, correlated: true, warning: 'Threshold may be too low.' },
+    }
+    const updated = applyScriptResult(dataset, { id: dataset.id, ordinateModified: [1, 2],
+      peaks: [], precision: 'float64', processingDiagnostics })
+    expect(updated.processingDiagnostics).toEqual(processingDiagnostics)
+    expect(updated.data.ordinateOriginal).toBe(dataset.data.ordinateOriginal)
+  })
+
   it('writes only the modified ordinate and precision, never the measurement', () => {
     const dataset = buildDataset({ data: { abscissa: [200.1, 201.3], ordinateOriginal: [0.1, 0.2], ordinateModified: [], precision: 'float64' } })
     const updated = applyScriptResult(dataset, { id: dataset.id, ordinateModified: [0.5, 0.6], peaks: [], precision: 'float32' })

@@ -217,6 +217,16 @@
       <HelpTip label="Automatic parameters" text={HELP.auto} />
     </div>
 
+    {#if dataset.processingDiagnostics?.noise?.warning}
+      <p class="option-description" role="status">{dataset.processingDiagnostics.noise.warning}</p>
+      <p class="option-description">
+        Noise estimates (lags 1 / 2 / 4):
+        {dataset.processingDiagnostics.noise.lagEstimates.lag1.toPrecision(3)} /
+        {dataset.processingDiagnostics.noise.lagEstimates.lag2.toPrecision(3)} /
+        {dataset.processingDiagnostics.noise.lagEstimates.lag4.toPrecision(3)}
+      </p>
+    {/if}
+
     <div class="peak-settings-fields">
       <label for={`peak-prominence-${dataset.id}`}>
         Prominence <HelpTip label="Prominence" text={HELP.prominence} />

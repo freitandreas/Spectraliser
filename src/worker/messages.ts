@@ -33,6 +33,12 @@ const assignedPeakSchema = z.object({
   alternatives: z.array(z.string()),
 })
 
+export const noiseDiagnosticsSchema = z.object({
+  lagEstimates: z.object({ lag1: z.number(), lag2: z.number(), lag4: z.number() }),
+  correlated: z.boolean(),
+  warning: z.string().nullable(),
+})
+
 export const smoothingSuggestionSchema = z.object({
   windowLength: z.number(),
   polyorder: z.number(),
@@ -40,9 +46,19 @@ export const smoothingSuggestionSchema = z.object({
   snr: z.number().nullable(),
   fwhmPoints: z.number().nullable(),
   status: z.enum(['ok', 'noise_free', 'too_narrow', 'too_short']),
+  noiseDiagnostics: noiseDiagnosticsSchema.optional(),
 })
 
 export type SmoothingSuggestion = z.infer<typeof smoothingSuggestionSchema>
+
+export const processingDiagnosticsSchema = z.object({
+  referenceNormalization: z.object({
+    value: z.number(), center: z.number(), halfWidth: z.number(),
+    pointCount: z.number().int().positive(), minimumAbs: z.number().nonnegative(),
+    xUnit: z.string(), yUnit: z.string(),
+  }).optional(),
+  noise: noiseDiagnosticsSchema.optional(),
+})
 
 export const workerRequestSchema = z.discriminatedUnion('type', [
   z.object({
@@ -104,6 +120,7 @@ export const workerResponseSchema = z.discriminatedUnion('type', [
         ordinateModified: signalSchema,
         peaks: z.array(assignedPeakSchema),
         precision: z.enum(['float32', 'float64']),
+        processingDiagnostics: processingDiagnosticsSchema.optional(),
       }),
       z.object({ id: z.string(), error: z.string() }),
     ])),
@@ -126,6 +143,7 @@ export const workerResponseSchema = z.discriminatedUnion('type', [
     ),
     /** Settings detection actually used; differs from the request when auto is on. */
     settings: z.object({ prominence: z.number(), minDistance: z.number() }),
+    noiseDiagnostics: noiseDiagnosticsSchema.optional(),
   }),
   z.object({
     type: z.literal('smoothing_suggestion'),

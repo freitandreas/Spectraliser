@@ -12,6 +12,7 @@ export const NORMALIZATION_MODES: DescribedOption[] = [
   { id: 'vector', label: 'Vector', description: 'Divides by the Euclidean norm, keeping relative band ratios intact.' },
   { id: 'area', label: 'Area', description: 'Divides by the absolute integrated area, so every spectrum carries equal area.' },
   { id: 'peak', label: 'Peak', description: 'Divides by the largest absolute intensity in the spectrum.' },
+  { id: 'reference', label: 'Reference window', description: 'Divides by the mean in a chosen axis window; refuses a near-zero reference.' },
 ]
 
 export const PEAK_PROFILE_MODELS: DescribedOption[] = [
