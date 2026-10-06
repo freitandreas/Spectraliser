@@ -18,6 +18,8 @@ Steps
 4. For the steps before the fibre was touched (27.2 to 5.44 mM), fit the corrected
    intensity at every wavenumber as I(nu) = k(nu) * c + r(nu), i.e. a spectrum that is
    proportional to concentration plus a concentration-independent contribution.
+5. At the band positions discussed in the report, compare this fit with a two-species
+   monomer-dimer model I = a * [M] + b * c (2 M <=> D, association constant chosen per position).
 """
 import argparse
 import json
@@ -53,6 +55,9 @@ V0_ML, C0_MM = 0.2, 27.2           # 5.44 umol in 0.2 mL
 FIBRE_TOUCHED = 79                 # offset from spectrum 79 onwards (ELN)
 ASLS_LAM, ASLS_P, ASLS_ITER, REF_WN = 1e5, 0.01, 10, 1182
 REF_HALF_WIDTH = 1                 # single 2 cm-1 point at 1182 cm-1, as in the AE-509 scripts
+BANDS = (1916, 1944, 1958)         # positions on the 2 cm-1 grid: k maximum and r maxima
+REPORTED = BANDS + (1610, 1628, 1636, REF_WN)
+K_GRID = np.logspace(-2, 6, 400)   # association constants for 2 M <=> D, in mM^-1
 
 
 def _elapsed_seconds(label):
@@ -116,13 +121,37 @@ def main():
     print('Dilution steps (mM, spectra):')
     for c, numbers in steps:
         print(f'  {c:6.2f}  {numbers[0]}-{numbers[-1]}')
-    print(f'AsLS-corrected value at {REF_WN} cm-1 falls {reference[0] / reference[-1]:.1f}-fold '
-          f'for a {conc[0] / conc[-1]:.0f}-fold dilution')
-    for target in (1916, 1945, 1965, 1610, 1625, 1635, REF_WN):
+    last_fit = np.flatnonzero(before_touch)[-1]
+    print(f'AsLS-corrected value at {REF_WN} cm-1 falls {reference[0] / reference[last_fit]:.1f}-fold '
+          f'for a {conc[0] / conc[last_fit]:.0f}-fold dilution ({conc[0]:.2f} to {conc[last_fit]:.2f} mM) and '
+          f'{reference[0] / reference[-1]:.1f}-fold for a {conc[0] / conc[-1]:.0f}-fold dilution')
+
+    c_fit, y_fit = conc[before_touch], corrected[before_touch]
+    residuals = y_fit - design @ np.vstack([k, r])
+
+    def rss(basis, y):
+        coefficients, *_ = np.linalg.lstsq(basis, y, rcond=None)
+        return float(((y - basis @ coefficients) ** 2).sum())
+
+    def monomer(K):
+        return (np.sqrt(1 + 8 * K * c_fit) - 1) / (4 * K)
+
+    print('Position: concentration-independent share at 27.2 mM, fit rms (% of I at 27.2 mM), '
+          'RSS(monomer-dimer)/RSS(Eq. 23), residuals 27.2 -> 5.44 mM')
+    for target in REPORTED:
         i = np.argmin(abs(wn - target))
         share = r[i] / (k[i] * conc[0] + r[i])
-        print(f'  {target} cm-1: concentration-independent share at {conc[0]:.1f} mM = {share:.2f}, '
-              f'fit rms = {rms[i]:.3f}')
+        linear = rss(design, y_fit[:, i])
+        dimer = min(rss(np.vstack([c_fit, monomer(K)]).T, y_fit[:, i]) for K in K_GRID)
+        print(f'  {wn[i]:.0f} cm-1: share {share:.2f}, rms {100 * rms[i] / corrected[0, i]:.1f}%, '
+              f'RSS ratio {dimer / linear:.1f}, residuals ' + ' '.join(f'{v:+.2g}' for v in residuals[:, i]))
+
+    i, step = np.argmin(abs(wn - 1916)), 1
+    single = np.array([(y - asls_baseline(y, ASLS_LAM, ASLS_P, ASLS_ITER))[i]
+                       for y in (spectra[n - 1][order] for n in steps[step][1])])
+    error = single.std(ddof=1) / np.sqrt(single.size)
+    print(f'{conc[step]:.1f} mM step at 1916 cm-1: {100 * -residuals[step, i] / corrected[step, i]:.1f}% below the fit, '
+          f'{-residuals[step, i] / error:.0f} times its standard error')
     return wn, conc, corrected, normalised, k, r, before_touch
 
 
@@ -146,7 +175,7 @@ def plot(wn, conc, corrected, normalised, k, r, before_touch, filename):
         ax.set_xlim(2040, 1860)
         ax.set_xlabel(r'Wavenumber / cm$^{-1}$')
         ax.set_ylabel(label)
-        for line in (1916, 1945, 1965):
+        for line in BANDS:
             ax.axvline(line, color='0.6', lw=.5, ls=':')
     a.set_title('(a) Normalised at 1182 cm$^{-1}$ (AE-509 workflow)', loc='left', fontsize=9)
     b.set_title('(b) Without reference normalisation', loc='left', fontsize=9)
@@ -155,7 +184,7 @@ def plot(wn, conc, corrected, normalised, k, r, before_touch, filename):
     bar.ax.yaxis.set_minor_formatter(mpl.ticker.NullFormatter())
     bar.set_ticks([2.72, 5.44, 10.9, 27.2], labels=['2.72', '5.44', '10.9', '27.2'])
 
-    markers = {1916: ('o', 'C0'), 1945: ('s', 'C1'), 1965: ('^', 'C2')}
+    markers = dict(zip(BANDS, (('o', 'C0'), ('s', 'C1'), ('^', 'C2'))))
     grid = np.linspace(0, conc.max(), 50)
     for target, (marker, colour) in markers.items():
         i = np.argmin(abs(wn - target))
@@ -177,7 +206,7 @@ def plot(wn, conc, corrected, normalised, k, r, before_touch, filename):
     d.set_ylabel('Absorbance / a.u.')
     d.legend(loc='upper left', fontsize=8)
     d.set_title('(d) Linear decomposition, 27.2–5.44 mM', loc='left', fontsize=9)
-    for line in (1916, 1945, 1965):
+    for line in BANDS:
         d.axvline(line, color='0.6', lw=.5, ls=':')
     fig.savefig(filename)
 

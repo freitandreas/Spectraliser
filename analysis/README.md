@@ -16,10 +16,12 @@ results always correspond to the processing code of the same checkout.
 Use the app built from the commit you cite in the report.
 
 **IR (AE-509).** Import `public/samples/AE-509-2.csv` with all 82 columns. Set the y quantity to
-Absorbance. Do not delete or reorder spectra: the script relies on the acquisition order (it checks
-the `hh:mm:ss` labels and stops if they are not increasing). Optionally set the AE-509 pipeline
-(baseline AsLS, lambda = 1e5, p = 0.01; normalisation by reference window at 1182 +/- 4 cm-1) so the
-session documents the processing; the scripts read the original data either way.
+Absorbance and leave the y unit empty: changing the unit to % rescales the stored data, including 
+the original ordinate, by 100. Do not delete or reorder spectra: the script relies on the acquisition 
+order (it checks the `hh:mm:ss` labels and stops if they are not increasing). Optionally set the AE-509 
+pipeline (baseline AsLS, lambda = 1e5, p = 0.01; normalisation by reference window at 1182 +/- 1 cm-1,
+i.e. the single point at 1182 cm-1 as in the AE-509 scripts) so the session documents the processing; 
+the scripts read the original data either way.
 Export -> Python project and put the ZIP into `analysis/sessions/ir/` (extracting it there, or
 into one subfolder, also works).
 
@@ -47,8 +49,9 @@ DejaVu Serif otherwise. Copy the two PDFs next to the report's `.tex` file.
 
 ## 3. Check against the report
 
-`ir_reanalysis.py` prints the dilution steps, the 3.0-fold decrease of the 1182 cm-1 reference over
-the 10-fold dilution and the concentration-independent shares (1916 cm-1: 0.10, 1945: 0.56,
-1965: 0.50, 1625: 0.45, 1635: 0.52). `uvvis_figure.py` prints A(370 nm, 0 min) = 1.300, the
-single-wavelength traces and the crossing points with the 0 min spectrum (370.4 -> 339.5 nm).
-If any of these change after a new export, update the report text.
+`ir_reanalysis.py` prints the dilution steps; the decrease of the 1182 cm-1 reference (2.3-fold
+for the 5-fold dilution from 27.20 to 5.44 mM, 3.0-fold for the 10-fold dilution); for 1916, 1944,
+1958, 1610, 1628, 1636 and 1182 cm-1 the concentration-independent shares (0.10, 0.56, 0.52, 0.16,
+0.49, 0.56, 0.35), the fit rms (1.2, 2.4, 1.7, 1.4, 0.7, 0.7 and 2.4% of the intensity at 27.2 mM)
+and the RSS ratio of the monomer-dimer model to Eq. 23 (1.0, 0.5, 3.3, 2.3, 23.1, 18.6, 1.8); and
+the 21.8 mM step at 1916 cm-1 (3.4% below the fit, 17 times its standard error).
