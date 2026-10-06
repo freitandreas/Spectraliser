@@ -20,12 +20,12 @@ Absorbance. Do not delete or reorder spectra: the script relies on the acquisiti
 the `hh:mm:ss` labels and stops if they are not increasing). Optionally set the AE-509 pipeline
 (baseline AsLS, lambda = 1e5, p = 0.01; normalisation by reference window at 1182 +/- 4 cm-1) so the
 session documents the processing; the scripts read the original data either way.
-Export -> Python project, then extract the ZIP so that `samples.json` lies directly in
-`analysis/sessions/ir/`.
+Export -> Python project and put the ZIP into `analysis/sessions/ir/` (extracting it there, or
+into one subfolder, also works).
 
 **UV/Vis (SI Section 8.3).** Import the 13 files `public/samples/Data_TR_UV_Vis/JS_603_<t>min_abs.csv`
-(not the `_trans` or `.dat` files). Export -> Python project and extract into
-`analysis/sessions/uvvis/`. The script checks that exactly the times 0, 1, 3, 5, 10, 20, 30, 60,
+(not the `_trans` or `.dat` files). Export -> Python project and put the ZIP (or its extracted
+contents) into `analysis/sessions/uvvis/`. The script checks that exactly the times 0, 1, 3, 5, 10, 20, 30, 60,
 90, 120, 190, 240 and 1187 min are present.
 
 ## 2. Run
@@ -40,7 +40,8 @@ python analysis/ir_reanalysis.py
 python analysis/uvvis_figure.py
 ```
 
-Both scripts accept `--session DIR` and `--out DIR` to use other locations. The figures use
+Both scripts accept `--session` (folder or `.zip`) and `--out` to use other locations. If no
+export is found, they say where they looked. The figures use
 Latin Modern Roman if it is installed (it ships with most TeX distributions) and fall back to
 DejaVu Serif otherwise. Copy the two PDFs next to the report's `.tex` file.
 
